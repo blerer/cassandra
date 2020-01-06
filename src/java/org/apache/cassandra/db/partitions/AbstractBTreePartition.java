@@ -20,6 +20,8 @@ package org.apache.cassandra.db.partitions;
 
 import java.util.Iterator;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -46,14 +48,15 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
         this.partitionKey = partitionKey;
     }
 
-    protected static final class Holder
+    @VisibleForTesting
+    public static final class Holder
     {
-        final PartitionColumns columns;
-        final DeletionInfo deletionInfo;
+        public final PartitionColumns columns;
+        public final DeletionInfo deletionInfo;
         // the btree of rows
-        final Object[] tree;
-        final Row staticRow;
-        final EncodingStats stats;
+        public final Object[] tree;
+        public final Row staticRow;
+        public final EncodingStats stats;
 
         Holder(PartitionColumns columns, Object[] tree, DeletionInfo deletionInfo, Row staticRow, EncodingStats stats)
         {
@@ -99,7 +102,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
 
     public DeletionTime partitionLevelDeletion()
     {
-        return deletionInfo().getPartitionDeletion();
+        return deletionInfo().partitionDeletion();
     }
 
     public PartitionColumns columns()
@@ -122,7 +125,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
 
     private Row staticRow(Holder current, ColumnFilter columns, boolean setActiveDeletionToRow)
     {
-        DeletionTime partitionDeletion = current.deletionInfo.getPartitionDeletion();
+        DeletionTime partitionDeletion = current.deletionInfo.partitionDeletion();
         if (columns.fetchedColumns().statics.isEmpty() || (current.staticRow.isEmpty() && partitionDeletion.isLive()))
             return Rows.EMPTY_STATIC_ROW;
 
@@ -137,7 +140,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
         return new SearchIterator<Clustering, Row>()
         {
             private final SearchIterator<Clustering, Row> rawIter = new BTreeSearchIterator<>(current.tree, metadata.comparator, desc(reversed));
-            private final DeletionTime partitionDeletion = current.deletionInfo.getPartitionDeletion();
+            private final DeletionTime partitionDeletion = current.deletionInfo.partitionDeletion();
 
             public Row next(Clustering clustering)
             {
@@ -184,7 +187,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
         Row staticRow = staticRow(current, selection, false);
         if (slices.size() == 0)
         {
-            DeletionTime partitionDeletion = current.deletionInfo.getPartitionDeletion();
+            DeletionTime partitionDeletion = current.deletionInfo.partitionDeletion();
             return UnfilteredRowIterators.noRowsIterator(metadata, partitionKey, staticRow, partitionDeletion, reversed);
         }
 
@@ -206,7 +209,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
     private RowAndDeletionMergeIterator merge(Iterator<Row> rowIter, Iterator<RangeTombstone> deleteIter,
                                                      ColumnFilter selection, boolean reversed, Holder current, Row staticRow)
     {
-        return new RowAndDeletionMergeIterator(metadata, partitionKey, current.deletionInfo.getPartitionDeletion(),
+        return new RowAndDeletionMergeIterator(metadata, partitionKey, current.deletionInfo.partitionDeletion(),
                                                selection, staticRow, reversed, current.stats,
                                                rowIter, deleteIter,
                                                canHaveShadowedData());
@@ -233,7 +236,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
         {
             super(AbstractBTreePartition.this.metadata,
                   AbstractBTreePartition.this.partitionKey,
-                  current.deletionInfo.getPartitionDeletion(),
+                  current.deletionInfo.partitionDeletion(),
                   selection.fetchedColumns(), // non-selected columns will be filtered in subclasses by RowAndDeletionMergeIterator
                                               // it would also be more precise to return the intersection of the selection and current.columns,
                                               // but its probably not worth spending time on computing that.
@@ -405,7 +408,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
 
     public Iterator<Row> iterator()
     {
-        return BTree.<Row>iterator(holder().tree);
+        return BTree.iterator(holder().tree);
     }
 
     public Row lastRow()
@@ -415,5 +418,17 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
             return null;
 
         return BTree.findByIndex(tree, BTree.size(tree) - 1);
+    }
+
+    @VisibleForTesting
+    public static Holder unsafeGetEmptyHolder()
+    {
+        return EMPTY;
+    }
+
+    @VisibleForTesting
+    public static Holder unsafeConstructHolder(PartitionColumns columns, Object[] tree, DeletionInfo deletionInfo, Row staticRow, EncodingStats stats)
+    {
+        return new Holder(columns, tree, deletionInfo, staticRow, stats);
     }
 }

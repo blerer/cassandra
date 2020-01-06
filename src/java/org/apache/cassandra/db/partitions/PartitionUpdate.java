@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import org.slf4j.Logger;
@@ -342,7 +343,7 @@ public class PartitionUpdate extends AbstractBTreePartition
     {
         Holder holder = holder();
         deletionInfo.updateAllTimestamp(newTimestamp - 1);
-        Object[] tree = BTree.<Row>transformAndFilter(holder.tree, (x) -> x.updateAllTimestamp(newTimestamp));
+        Object[] tree = BTree.<Row, Row>transformAndFilter(holder.tree, (x) -> x.updateAllTimestamp(newTimestamp));
         Row staticRow = holder.staticRow.updateAllTimestamp(newTimestamp);
         EncodingStats newStats = EncodingStats.Collector.collect(staticRow, BTree.<Row>iterator(tree), deletionInfo);
         this.holder = new Holder(holder.columns, tree, deletionInfo, staticRow, newStats);
@@ -361,7 +362,7 @@ public class PartitionUpdate extends AbstractBTreePartition
         return rowCount()
              + (staticRow().isEmpty() ? 0 : 1)
              + deletionInfo.rangeCount()
-             + (deletionInfo.getPartitionDeletion().isLive() ? 0 : 1);
+             + (deletionInfo.partitionDeletion().isLive() ? 0 : 1);
     }
 
     /**
@@ -537,13 +538,13 @@ public class PartitionUpdate extends AbstractBTreePartition
     public void addPartitionDeletion(DeletionTime deletionTime)
     {
         assertNotBuilt();
-        deletionInfo.add(deletionTime);
+        deletionInfo.mutableAdd(deletionTime);
     }
 
     public void add(RangeTombstone range)
     {
         assertNotBuilt();
-        deletionInfo.add(range, metadata.comparator);
+        deletionInfo.mutableAdd(range, metadata.comparator);
     }
 
     /**
@@ -599,7 +600,7 @@ public class PartitionUpdate extends AbstractBTreePartition
         Holder holder = this.holder;
         Object[] cur = holder.tree;
         Object[] add = rowBuilder.build();
-        Object[] merged = BTree.<Row>merge(cur, add, metadata.comparator,
+        Object[] merged = BTree.<Row, Row, Row>update(cur, add, metadata.comparator,
                                            UpdateFunction.Simple.of((a, b) -> Rows.merge(a, b, createdAtInSec)));
 
         assert deletionInfo == holder.deletionInfo;
@@ -783,5 +784,15 @@ public class PartitionUpdate extends AbstractBTreePartition
             assert row instanceof BTreeRow;
             ((BTreeRow)row).setValue(column, path, value);
         }
+    }
+
+    @VisibleForTesting
+    public static PartitionUpdate unsafeConstruct(CFMetaData metadata,
+                                                  DecoratedKey key,
+                                                  Holder holder,
+                                                  MutableDeletionInfo deletionInfo,
+                                                  boolean canHaveShadowedData)
+    {
+        return new PartitionUpdate(metadata, key, holder, deletionInfo, canHaveShadowedData);
     }
 }
