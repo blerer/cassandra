@@ -27,29 +27,43 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
-public abstract class Relation
+/**
+ * A predicate on the values of one or several columns within the {@code WHERE} clause.
+ * <p>
+ * For examples:
+ *  <ul>
+ *    <li>a = 1</li>
+ *    <li>a &gt; 1</li>
+ *    <li>(a, b, c) &gt; (1, 'a', 10)</li>
+ *    <li>(a, b, c) IN ((1, 2, 3), (4, 5, 6))</li>
+ *    <li>token(a) &gt; token(1)</li>
+ *    <li>token(a, b) &gt; token(1, 3)</li>
+ *   </ul>
+ * </p>
+ */
+public abstract class ColumnsPredicate extends CqlPredicate
 {
-    protected Operator relationType;
+    protected Operator predicateType;
 
     public Operator operator()
     {
-        return relationType;
+        return predicateType;
     }
 
     /**
-     * Returns the raw value for this relation, or null if this is an IN relation.
+     * Returns the raw value for this predicate, or null if this is an IN predicate.
      */
     public abstract Term.Raw getValue();
 
     /**
-     * Returns the list of raw IN values for this relation, or null if this is not an IN relation.
+     * Returns the list of raw IN values for this predicate, or null if this is not an IN predicate.
      */
     public abstract List<? extends Term.Raw> getInValues();
 
     /**
-     * Checks if this relation apply to multiple columns.
+     * Checks if this predicate apply to multiple columns.
      *
-     * @return <code>true</code> if this relation apply to multiple columns, <code>false</code> otherwise.
+     * @return <code>true</code> if this predicate apply to multiple columns, <code>false</code> otherwise.
      */
     public boolean isMultiColumn()
     {
@@ -57,9 +71,9 @@ public abstract class Relation
     }
 
     /**
-     * Checks if this relation is a token relation (e.g. <pre>token(a) = token(1)</pre>).
+     * Checks if this predicate is a token predicate (e.g. <pre>token(a) = token(1)</pre>).
      *
-     * @return <code>true</code> if this relation is a token relation, <code>false</code> otherwise.
+     * @return <code>true</code> if this predicate is a token predicate, <code>false</code> otherwise.
      */
     public boolean onToken()
     {
@@ -67,78 +81,78 @@ public abstract class Relation
     }
 
     /**
-     * Checks if the operator of this relation is a <code>CONTAINS</code>.
-     * @return <code>true</code>  if the operator of this relation is a <code>CONTAINS</code>, <code>false</code>
+     * Checks if the operator of this predicate is a <code>CONTAINS</code>.
+     * @return <code>true</code>  if the operator of this predicate is a <code>CONTAINS</code>, <code>false</code>
      * otherwise.
      */
     public final boolean isContains()
     {
-        return relationType == Operator.CONTAINS;
+        return predicateType == Operator.CONTAINS;
     }
 
     /**
-     * Checks if the operator of this relation is a <code>CONTAINS_KEY</code>.
-     * @return <code>true</code>  if the operator of this relation is a <code>CONTAINS_KEY</code>, <code>false</code>
+     * Checks if the operator of this predicate is a <code>CONTAINS_KEY</code>.
+     * @return <code>true</code>  if the operator of this predicate is a <code>CONTAINS_KEY</code>, <code>false</code>
      * otherwise.
      */
     public final boolean isContainsKey()
     {
-        return relationType == Operator.CONTAINS_KEY;
+        return predicateType == Operator.CONTAINS_KEY;
     }
 
     /**
-     * Checks if the operator of this relation is a <code>IN</code>.
-     * @return <code>true</code>  if the operator of this relation is a <code>IN</code>, <code>false</code>
+     * Checks if the operator of this predicate is a <code>IN</code>.
+     * @return <code>true</code>  if the operator of this predicate is a <code>IN</code>, <code>false</code>
      * otherwise.
      */
     public final boolean isIN()
     {
-        return relationType == Operator.IN;
+        return predicateType == Operator.IN;
     }
 
     /**
-     * Checks if the operator of this relation is a <code>EQ</code>.
-     * @return <code>true</code>  if the operator of this relation is a <code>EQ</code>, <code>false</code>
+     * Checks if the operator of this predicate is a <code>EQ</code>.
+     * @return <code>true</code>  if the operator of this predicate is a <code>EQ</code>, <code>false</code>
      * otherwise.
      */
     public final boolean isEQ()
     {
-        return relationType == Operator.EQ;
+        return predicateType == Operator.EQ;
     }
 
     public final boolean isLIKE()
     {
-        return relationType == Operator.LIKE_PREFIX
-                || relationType == Operator.LIKE_SUFFIX
-                || relationType == Operator.LIKE_CONTAINS
-                || relationType == Operator.LIKE_MATCHES
-                || relationType == Operator.LIKE;
+        return predicateType == Operator.LIKE_PREFIX
+                || predicateType == Operator.LIKE_SUFFIX
+                || predicateType == Operator.LIKE_CONTAINS
+                || predicateType == Operator.LIKE_MATCHES
+                || predicateType == Operator.LIKE;
     }
 
     /**
-     * Checks if the operator of this relation is a <code>Slice</code> (GT, GTE, LTE, LT).
+     * Checks if the operator of this predicate is a <code>Slice</code> (GT, GTE, LTE, LT).
      *
-     * @return <code>true</code> if the operator of this relation is a <code>Slice</code>, <code>false</code> otherwise.
+     * @return <code>true</code> if the operator of this predicate is a <code>Slice</code>, <code>false</code> otherwise.
      */
     public final boolean isSlice()
     {
-        return relationType == Operator.GT
-                || relationType == Operator.GTE
-                || relationType == Operator.LTE
-                || relationType == Operator.LT;
+        return predicateType == Operator.GT
+                || predicateType == Operator.GTE
+                || predicateType == Operator.LTE
+                || predicateType == Operator.LT;
     }
 
     /**
-     * Converts this <code>Relation</code> into a <code>Restriction</code>.
+     * Converts this <code>Predicate</code> into a <code>Restriction</code>.
      *
      * @param table the Column Family meta data
      * @param boundNames the variables specification where to collect the bind variables
-     * @return the <code>Restriction</code> corresponding to this <code>Relation</code>
+     * @return the <code>Restriction</code> corresponding to this <code>Predicate</code>
      * @throws InvalidRequestException if this <code>Relation</code> is not valid
      */
     public final Restriction toRestriction(TableMetadata table, VariableSpecifications boundNames)
     {
-        switch (relationType)
+        switch (predicateType)
         {
             case EQ: return newEQRestriction(table, boundNames);
             case LT: return newSliceRestriction(table, boundNames, Bound.END, false);
@@ -154,8 +168,8 @@ public abstract class Relation
             case LIKE_CONTAINS:
             case LIKE_MATCHES:
             case LIKE:
-                return newLikeRestriction(table, boundNames, relationType);
-            default: throw invalidRequest("Unsupported \"!=\" relation: %s", this);
+                return newLikeRestriction(table, boundNames, predicateType);
+            default: throw invalidRequest("Unsupported \"!=\" predicate: %s", this);
         }
     }
 
@@ -165,7 +179,7 @@ public abstract class Relation
      * @param table the table meta data
      * @param boundNames the variables specification where to collect the bind variables
      * @return a new EQ restriction instance.
-     * @throws InvalidRequestException if the relation cannot be converted into an EQ restriction.
+     * @throws InvalidRequestException if the predicate cannot be converted into an EQ restriction.
      */
     protected abstract Restriction newEQRestriction(TableMetadata table, VariableSpecifications boundNames);
 
@@ -175,7 +189,7 @@ public abstract class Relation
      * @param table the table meta data
      * @param boundNames the variables specification where to collect the bind variables
      * @return a new IN restriction instance
-     * @throws InvalidRequestException if the relation cannot be converted into an IN restriction.
+     * @throws InvalidRequestException if the predicate cannot be converted into an IN restriction.
      */
     protected abstract Restriction newINRestriction(TableMetadata table, VariableSpecifications boundNames);
 
@@ -187,7 +201,7 @@ public abstract class Relation
      * @param bound the slice bound
      * @param inclusive <code>true</code> if the bound is included.
      * @return a new slice restriction instance
-     * @throws InvalidRequestException if the <code>Relation</code> is not valid
+     * @throws InvalidRequestException if the <code>Predicate</code> is not valid
      */
     protected abstract Restriction newSliceRestriction(TableMetadata table,
                                                        VariableSpecifications boundNames,
@@ -201,7 +215,7 @@ public abstract class Relation
      * @param boundNames the variables specification where to collect the bind variables
      * @param isKey <code>true</code> if the restriction to create is a CONTAINS KEY
      * @return a new Contains <code>Restriction</code> instance
-     * @throws InvalidRequestException if the <code>Relation</code> is not valid
+     * @throws InvalidRequestException if the <code>Predicate</code> is not valid
      */
     protected abstract Restriction newContainsRestriction(TableMetadata table, VariableSpecifications boundNames, boolean isKey);
 
@@ -249,25 +263,9 @@ public abstract class Relation
         return terms;
     }
 
-    /**
-     * Renames an identifier in this Relation, if applicable.
-     * @param from the old identifier
-     * @param to the new identifier
-     * @return this object, if the old identifier is not in the set of entities that this relation covers; otherwise
-     *         a new Relation with "from" replaced by "to" is returned.
-     */
-    public abstract Relation renameIdentifier(ColumnIdentifier from, ColumnIdentifier to);
-
-    /**
-     * Returns a CQL representation of this relation.
-     *
-     * @return a CQL representation of this relation
-     */
-    public abstract String toCQLString();
-
     @Override
-    public String toString()
+    public final boolean containsCustomExpressions()
     {
-        return toCQLString();
+        return false;
     }
 }

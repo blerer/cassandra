@@ -33,7 +33,7 @@ public enum Operator
     EQ(0)
     {
         @Override
-        public String toString()
+        public String toCqlString()
         {
             return "=";
         }
@@ -47,7 +47,7 @@ public enum Operator
     LT(4)
     {
         @Override
-        public String toString()
+        public String toCqlString()
         {
             return "<";
         }
@@ -61,7 +61,7 @@ public enum Operator
     LTE(3)
     {
         @Override
-        public String toString()
+        public String toCqlString()
         {
             return "<=";
         }
@@ -75,7 +75,7 @@ public enum Operator
     GTE(1)
     {
         @Override
-        public String toString()
+        public String toCqlString()
         {
             return ">=";
         }
@@ -89,7 +89,7 @@ public enum Operator
     GT(2)
     {
         @Override
-        public String toString()
+        public String toCqlString()
         {
             return ">";
         }
@@ -103,7 +103,7 @@ public enum Operator
     IN(7)
     {
         @Override
-        public String toString()
+        public String toCqlString()
         {
             return "IN";
         }
@@ -117,7 +117,7 @@ public enum Operator
     CONTAINS(5)
     {
         @Override
-        public String toString()
+        public String toCqlString()
         {
             return "CONTAINS";
         }
@@ -147,7 +147,7 @@ public enum Operator
     CONTAINS_KEY(6)
     {
         @Override
-        public String toString()
+        public String toCqlString()
         {
             return "CONTAINS KEY";
         }
@@ -163,7 +163,7 @@ public enum Operator
     NEQ(8)
     {
         @Override
-        public String toString()
+        public String toCqlString()
         {
             return "!=";
         }
@@ -178,7 +178,7 @@ public enum Operator
     IS_NOT(9)
     {
         @Override
-        public String toString()
+        public String toCqlString()
         {
             return "IS NOT";
         }
@@ -192,7 +192,7 @@ public enum Operator
     LIKE_PREFIX(10)
     {
         @Override
-        public String toString()
+        public String toCqlString()
         {
             return "LIKE '<term>%'";
         }
@@ -206,7 +206,7 @@ public enum Operator
     LIKE_SUFFIX(11)
     {
         @Override
-        public String toString()
+        public String toCqlString()
         {
             return "LIKE '%<term>'";
         }
@@ -220,7 +220,7 @@ public enum Operator
     LIKE_CONTAINS(12)
     {
         @Override
-        public String toString()
+        public String toCqlString()
         {
             return "LIKE '%<term>%'";
         }
@@ -234,7 +234,7 @@ public enum Operator
     LIKE_MATCHES(13)
     {
         @Override
-        public String toString()
+        public String toCqlString()
         {
             return "LIKE '<term>'";
         }
@@ -247,7 +247,7 @@ public enum Operator
     LIKE(14)
     {
         @Override
-        public String toString()
+        public String toCqlString()
         {
             return "LIKE";
         }
@@ -328,7 +328,7 @@ public enum Operator
     @Override
     public String toString()
     {
-         return this.name();
+         return toCqlString();
     }
 
     /**
@@ -339,4 +339,11 @@ public enum Operator
     {
         return this == IN;
     }
+
+    /**
+     * Returns a CQL representation of this operator.
+     *
+     * @return a CQL representation of this operator
+     */
+    public abstract String toCqlString();
 }

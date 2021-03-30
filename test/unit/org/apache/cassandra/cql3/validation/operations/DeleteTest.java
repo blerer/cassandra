@@ -23,8 +23,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-import org.apache.commons.lang3.StringUtils;
-
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
@@ -33,7 +31,6 @@ import org.apache.cassandra.db.Keyspace;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.EMPTY_BYTE_BUFFER;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
-import static org.apache.commons.lang3.StringUtils.isEmpty;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -452,7 +449,7 @@ public class DeleteTest extends CQLTester
                              "DELETE FROM %s WHERE token(partitionKey) = token(?)", 0);
 
         // multiple time same primary key element in WHERE clause
-        assertInvalidMessage("partitionkey cannot be restricted by more than one relation if it includes an Equal",
+        assertInvalidMessage("partitionkey cannot be restricted by more than one predicate if it includes an Equal",
                              "DELETE FROM %s WHERE partitionKey = ? AND partitionKey = ?", 0, 1);
 
         // unknown identifiers
@@ -463,7 +460,7 @@ public class DeleteTest extends CQLTester
                              "DELETE FROM %s WHERE partitionKey1 = ?", 0);
 
         // Invalid operator in the where clause
-        assertInvalidMessage("Only EQ and IN relation are supported on the partition key (unless you use the token() function)",
+        assertInvalidMessage("Only EQ and IN predicate are supported on the partition key (unless you use the token() function)",
                              "DELETE FROM %s WHERE partitionKey > ? ", 0);
 
         assertInvalidMessage("Cannot use CONTAINS on non-collection column partitionkey",
@@ -531,7 +528,7 @@ public class DeleteTest extends CQLTester
                              "DELETE FROM %s WHERE token(partitionKey) = token(?) AND clustering = ? ", 0, 1);
 
         // multiple time same primary key element in WHERE clause
-        assertInvalidMessage("clustering cannot be restricted by more than one relation if it includes an Equal",
+        assertInvalidMessage("clustering cannot be restricted by more than one predicate if it includes an Equal",
                              "DELETE FROM %s WHERE partitionKey = ? AND clustering = ? AND clustering = ?", 0, 1, 1);
 
         // unknown identifiers
@@ -545,7 +542,7 @@ public class DeleteTest extends CQLTester
                              "DELETE FROM %s WHERE partitionKey = ? AND clustering_3 = ?", 0, 1);
 
         // Invalid operator in the where clause
-        assertInvalidMessage("Only EQ and IN relation are supported on the partition key (unless you use the token() function)",
+        assertInvalidMessage("Only EQ and IN predicate are supported on the partition key (unless you use the token() function)",
                              "DELETE FROM %s WHERE partitionKey > ? AND clustering = ?", 0, 1);
 
         assertInvalidMessage("Cannot use CONTAINS on non-collection column partitionkey",
@@ -632,7 +629,7 @@ public class DeleteTest extends CQLTester
                              "DELETE FROM %s WHERE token(partitionKey) = token(?) AND clustering_1 = ? AND clustering_2 = ?", 0, 1, 1);
 
         // multiple time same primary key element in WHERE clause
-        assertInvalidMessage("clustering_1 cannot be restricted by more than one relation if it includes an Equal",
+        assertInvalidMessage("clustering_1 cannot be restricted by more than one predicate if it includes an Equal",
                              "DELETE FROM %s WHERE partitionKey = ? AND clustering_1 = ? AND clustering_2 = ? AND clustering_1 = ?", 0, 1, 1, 1);
 
         // unknown identifiers
@@ -646,7 +643,7 @@ public class DeleteTest extends CQLTester
                              "DELETE FROM %s WHERE partitionKey = ? AND clustering_1 = ? AND clustering_3 = ?", 0, 1, 1);
 
         // Invalid operator in the where clause
-        assertInvalidMessage("Only EQ and IN relation are supported on the partition key (unless you use the token() function)",
+        assertInvalidMessage("Only EQ and IN predicate are supported on the partition key (unless you use the token() function)",
                              "DELETE FROM %s WHERE partitionKey > ? AND clustering_1 = ? AND clustering_2 = ?", 0, 1, 1);
 
         assertInvalidMessage("Cannot use CONTAINS on non-collection column partitionkey",

@@ -287,7 +287,7 @@ selectStatement returns [SelectStatement.RawStatement expr]
                                                                              $sclause.isDistinct,
                                                                              allowFiltering,
                                                                              isJson);
-          WhereClause where = wclause == null ? WhereClause.empty() : wclause.build();
+          WhereClause where = wclause == null ? WhereClause.empty() : wclause;
           $expr = new SelectStatement.RawStatement(cf, params, $sclause.selectors, where, limit, perPartitionLimit);
       }
     ;
@@ -441,19 +441,25 @@ sident returns [Selectable.RawIdentifier id]
     | k=unreserved_keyword { $id = Selectable.RawIdentifier.forUnquoted(k); }
     ;
 
-whereClause returns [WhereClause.Builder clause]
-    @init{ $clause = new WhereClause.Builder(); }
-    : relationOrExpression[$clause] (K_AND relationOrExpression[$clause])*
+whereClause returns [WhereClause clause]
+    @init{$clause = WhereClause.empty();}
+    : p=andPredicate { $clause = new WhereClause(p); }
     ;
 
-relationOrExpression [WhereClause.Builder clause]
-    : relation[$clause]
-    | customIndexExpression[$clause]
+andPredicate returns [CqlPredicate predicate]
+    : l=simplePredicate { $predicate = l; } (K_AND r=simplePredicate { $predicate = new AndPredicate($predicate, r); })*
     ;
 
-customIndexExpression [WhereClause.Builder clause]
+simplePredicate returns [CqlPredicate predicate]
+    : s=singleColumnPredicate { $predicate = s; }
+    | t=tokenPredicate { $predicate = t; }
+    | m=multiColumnsPredicate { $predicate = m; }
+    | '(' a=andPredicate ')' { $predicate = a; }
+    ;
+
+customIndexExpression returns [CqlPredicate predicate]
     @init{QualifiedName name = new QualifiedName();}
-    : 'expr(' idxName[name] ',' t=term ')' { clause.add(new CustomIndexExpression(name, t));}
+    : 'expr(' idxName[name] ',' t=term ')' { $predicate = new CustomIndexExpression(name, t);}
     ;
 
 orderByClause[Map<ColumnIdentifier, Boolean> orderings]
@@ -548,7 +554,7 @@ updateStatement returns [UpdateStatement.ParsedUpdate expr]
           $expr = new UpdateStatement.ParsedUpdate(cf,
                                                    attrs,
                                                    operations,
-                                                   wclause.build(),
+                                                   wclause,
                                                    conditions == null ? Collections.<Pair<ColumnIdentifier, ColumnCondition.Raw>>emptyList() : conditions,
                                                    ifExists);
      }
@@ -582,7 +588,7 @@ deleteStatement returns [DeleteStatement.Parsed expr]
           $expr = new DeleteStatement.Parsed(cf,
                                              attrs,
                                              columnDeletions,
-                                             wclause.build(),
+                                             wclause,
                                              conditions == null ? Collections.<Pair<ColumnIdentifier, ColumnCondition.Raw>>emptyList() : conditions,
                                              ifExists);
       }
@@ -864,7 +870,7 @@ createMaterializedViewStatement returns [CreateViewStatement.Raw stmt]
         K_SELECT sclause=selectors K_FROM basecf=columnFamilyName
         (K_WHERE wclause=whereClause)?
         {
-             WhereClause where = wclause == null ? WhereClause.empty() : wclause.build();
+             WhereClause where = wclause == null ? WhereClause.empty() : wclause;
              $stmt = new CreateViewStatement.Raw(basecf, cf, sclause, where, ifNotExists);
         }
         viewPrimaryKey[stmt]
@@ -1669,39 +1675,43 @@ relationType returns [Operator op]
     | '!=' { $op = Operator.NEQ; }
     ;
 
-relation[WhereClause.Builder clauses]
-    : name=cident type=relationType t=term { $clauses.add(new SingleColumnRelation(name, type, t)); }
-    | name=cident K_LIKE t=term { $clauses.add(new SingleColumnRelation(name, Operator.LIKE, t)); }
-    | name=cident K_IS K_NOT K_NULL { $clauses.add(new SingleColumnRelation(name, Operator.IS_NOT, Constants.NULL_LITERAL)); }
-    | K_TOKEN l=tupleOfIdentifiers type=relationType t=term
-        { $clauses.add(new TokenRelation(l, type, t)); }
+singleColumnPredicate returns [CqlPredicate p]
+    : name=cident type=relationType t=term { $p = new SingleColumnPredicate(name, type, t); }
+    | name=cident K_LIKE t=term { $p = new SingleColumnPredicate(name, Operator.LIKE, t); }
+    | name=cident K_IS K_NOT K_NULL { $p = new SingleColumnPredicate(name, Operator.IS_NOT, Constants.NULL_LITERAL); }
     | name=cident K_IN marker=inMarker
-        { $clauses.add(new SingleColumnRelation(name, Operator.IN, marker)); }
+        { $p = new SingleColumnPredicate(name, Operator.IN, marker); }
     | name=cident K_IN inValues=singleColumnInValues
-        { $clauses.add(SingleColumnRelation.createInRelation($name.id, inValues)); }
-    | name=cident rt=containsOperator t=term { $clauses.add(new SingleColumnRelation(name, rt, t)); }
-    | name=cident '[' key=term ']' type=relationType t=term { $clauses.add(new SingleColumnRelation(name, key, type, t)); }
-    | ids=tupleOfIdentifiers
+        { $p = SingleColumnPredicate.createInPredicate($name.id, inValues); }
+    | name=cident rt=containsOperator t=term { $p = new SingleColumnPredicate(name, rt, t); }
+    | name=cident '[' key=term ']' type=relationType t=term { $p = new SingleColumnPredicate(name, key, type, t); }
+    ;
+
+multiColumnsPredicate returns [CqlPredicate p]
+    : ids=tupleOfIdentifiers
       ( K_IN
           ( '(' ')'
-              { $clauses.add(MultiColumnRelation.createInRelation(ids, new ArrayList<Tuples.Literal>())); }
+              { $p = MultiColumnsPredicate.createInPredicate(ids, new ArrayList<Tuples.Literal>()); }
           | tupleInMarker=inMarkerForTuple /* (a, b, c) IN ? */
-              { $clauses.add(MultiColumnRelation.createSingleMarkerInRelation(ids, tupleInMarker)); }
+              { $p = MultiColumnsPredicate.createSingleMarkerInPredicate(ids, tupleInMarker); }
           | literals=tupleOfTupleLiterals /* (a, b, c) IN ((1, 2, 3), (4, 5, 6), ...) */
               {
-                  $clauses.add(MultiColumnRelation.createInRelation(ids, literals));
+                  $p = MultiColumnsPredicate.createInPredicate(ids, literals);
               }
           | markers=tupleOfMarkersForTuples /* (a, b, c) IN (?, ?, ...) */
-              { $clauses.add(MultiColumnRelation.createInRelation(ids, markers)); }
+              { $p = MultiColumnsPredicate.createInPredicate(ids, markers); }
           )
       | type=relationType literal=tupleLiteral /* (a, b, c) > (1, 2, 3) or (a, b, c) > (?, ?, ?) */
           {
-              $clauses.add(MultiColumnRelation.createNonInRelation(ids, type, literal));
+              $p = MultiColumnsPredicate.createNonInPredicate(ids, type, literal);
           }
       | type=relationType tupleMarker=markerForTuple /* (a, b, c) >= ? */
-          { $clauses.add(MultiColumnRelation.createNonInRelation(ids, type, tupleMarker)); }
+          { $p = MultiColumnsPredicate.createNonInPredicate(ids, type, tupleMarker); }
       )
-    | '(' relation[$clauses] ')'
+    ;
+
+tokenPredicate returns [CqlPredicate p]
+    : K_TOKEN l=tupleOfIdentifiers type=relationType t=term { $p = new TokenPredicate(l, type, t); }
     ;
 
 containsOperator returns [Operator o]

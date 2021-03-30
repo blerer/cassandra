@@ -78,12 +78,12 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
             ColumnMetadata newRestrictionStart = restriction.getFirstColumn();
 
             checkFalse(lastRestriction.isSlice() && newRestrictionStart.position() > lastRestrictionStart.position(),
-                       "Clustering column \"%s\" cannot be restricted (preceding column \"%s\" is restricted by a non-EQ relation)",
+                       "Clustering column \"%s\" cannot be restricted (preceding column \"%s\" is restricted by a non-EQ predicate)",
                        newRestrictionStart.name,
                        lastRestrictionStart.name);
 
             if (newRestrictionStart.position() < lastRestrictionStart.position() && newRestriction.isSlice())
-                throw invalidRequest("PRIMARY KEY column \"%s\" cannot be restricted (preceding column \"%s\" is restricted by a non-EQ relation)",
+                throw invalidRequest("PRIMARY KEY column \"%s\" cannot be restricted (preceding column \"%s\" is restricted by a non-EQ predicate)",
                                      restrictions.nextColumn(newRestrictionStart).name,
                                      newRestrictionStart.name);
         }

@@ -36,7 +36,7 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
 /**
- * A relation using the tuple notation, which typically affects multiple columns.
+ * A predicate using the tuple notation, which typically affects multiple columns.
  * Examples:
  * {@code
  *  - SELECT ... WHERE (a, b, c) > (1, 'a', 10)
@@ -45,7 +45,7 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.invalidReq
  *  - SELECT ... WHERE (a, b) IN ?
  * }
  */
-public class MultiColumnRelation extends Relation
+public class MultiColumnsPredicate extends ColumnsPredicate
 {
     private final List<ColumnIdentifier> entities;
 
@@ -57,10 +57,10 @@ public class MultiColumnRelation extends Relation
 
     private final Tuples.INRaw inMarker;
 
-    private MultiColumnRelation(List<ColumnIdentifier> entities, Operator relationType, Term.MultiColumnRaw valuesOrMarker, List<? extends Term.MultiColumnRaw> inValues, Tuples.INRaw inMarker)
+    private MultiColumnsPredicate(List<ColumnIdentifier> entities, Operator predicateType, Term.MultiColumnRaw valuesOrMarker, List<? extends Term.MultiColumnRaw> inValues, Tuples.INRaw inMarker)
     {
         this.entities = entities;
-        this.relationType = relationType;
+        this.predicateType = predicateType;
         this.valuesOrMarker = valuesOrMarker;
 
         this.inValues = inValues;
@@ -68,43 +68,43 @@ public class MultiColumnRelation extends Relation
     }
 
     /**
-     * Creates a multi-column EQ, LT, LTE, GT, or GTE relation.
+     * Creates a multi-column EQ, LT, LTE, GT, or GTE predicate.
      * {@code
      * For example: "SELECT ... WHERE (a, b) > (0, 1)"
      * }
-     * @param entities the columns on the LHS of the relation
-     * @param relationType the relation operator
+     * @param entities the columns on the LHS of the predicate
+     * @param predicateType the predicate operator
      * @param valuesOrMarker a Tuples.Literal instance or a Tuples.Raw marker
-     * @return a new <code>MultiColumnRelation</code> instance
+     * @return a new <code>MultiColumnsPredicate</code> instance
      */
-    public static MultiColumnRelation createNonInRelation(List<ColumnIdentifier> entities, Operator relationType, Term.MultiColumnRaw valuesOrMarker)
+    public static MultiColumnsPredicate createNonInPredicate(List<ColumnIdentifier> entities, Operator predicateType, Term.MultiColumnRaw valuesOrMarker)
     {
-        assert relationType != Operator.IN;
-        return new MultiColumnRelation(entities, relationType, valuesOrMarker, null, null);
+        assert predicateType != Operator.IN;
+        return new MultiColumnsPredicate(entities, predicateType, valuesOrMarker, null, null);
     }
 
     /**
-     * Creates a multi-column IN relation with a list of IN values or markers.
+     * Creates a multi-column IN predicate with a list of IN values or markers.
      * For example: "SELECT ... WHERE (a, b) IN ((0, 1), (2, 3))"
-     * @param entities the columns on the LHS of the relation
+     * @param entities the columns on the LHS of the predicate
      * @param inValues a list of Tuples.Literal instances or a Tuples.Raw markers
-     * @return a new <code>MultiColumnRelation</code> instance
+     * @return a new <code>MultiColumnsPredicate</code> instance
      */
-    public static MultiColumnRelation createInRelation(List<ColumnIdentifier> entities, List<? extends Term.MultiColumnRaw> inValues)
+    public static MultiColumnsPredicate createInPredicate(List<ColumnIdentifier> entities, List<? extends Term.MultiColumnRaw> inValues)
     {
-        return new MultiColumnRelation(entities, Operator.IN, null, inValues, null);
+        return new MultiColumnsPredicate(entities, Operator.IN, null, inValues, null);
     }
 
     /**
-     * Creates a multi-column IN relation with a marker for the IN values.
+     * Creates a multi-column IN predicate with a marker for the IN values.
      * For example: "SELECT ... WHERE (a, b) IN ?"
-     * @param entities the columns on the LHS of the relation
+     * @param entities the columns on the LHS of the predicate
      * @param inMarker a single IN marker
-     * @return a new <code>MultiColumnRelation</code> instance
+     * @return a new <code>MultiColumnsPredicate</code> instance
      */
-    public static MultiColumnRelation createSingleMarkerInRelation(List<ColumnIdentifier> entities, Tuples.INRaw inMarker)
+    public static MultiColumnsPredicate createSingleMarkerInPredicate(List<ColumnIdentifier> entities, Tuples.INRaw inMarker)
     {
-        return new MultiColumnRelation(entities, Operator.IN, null, null, inMarker);
+        return new MultiColumnsPredicate(entities, Operator.IN, null, null, inMarker);
     }
 
     public List<ColumnIdentifier> getEntities()
@@ -113,17 +113,17 @@ public class MultiColumnRelation extends Relation
     }
 
     /**
-     * For non-IN relations, returns the Tuples.Literal or Tuples.Raw marker for a single tuple.
-     * @return a Tuples.Literal for non-IN relations or Tuples.Raw marker for a single tuple.
+     * For non-IN predicates, returns the Tuples.Literal or Tuples.Raw marker for a single tuple.
+     * @return a Tuples.Literal for non-IN predicates or Tuples.Raw marker for a single tuple.
      */
     public Term.MultiColumnRaw getValue()
     {
-        return relationType == Operator.IN ? inMarker : valuesOrMarker;
+        return predicateType == Operator.IN ? inMarker : valuesOrMarker;
     }
 
     public List<? extends Term.Raw> getInValues()
     {
-        assert relationType == Operator.IN;
+        assert predicateType == Operator.IN;
         return inValues;
     }
 
@@ -169,20 +169,20 @@ public class MultiColumnRelation extends Relation
     @Override
     protected Restriction newContainsRestriction(TableMetadata table, VariableSpecifications boundNames, boolean isKey)
     {
-        throw invalidRequest("%s cannot be used for multi-column relations", operator());
+        throw invalidRequest("%s cannot be used for multi-column predicates", operator());
     }
 
     @Override
     protected Restriction newIsNotRestriction(TableMetadata table, VariableSpecifications boundNames)
     {
         // this is currently disallowed by the grammar
-        throw new AssertionError(String.format("%s cannot be used for multi-column relations", operator()));
+        throw new AssertionError(String.format("%s cannot be used for multi-column predicates", operator()));
     }
 
     @Override
     protected Restriction newLikeRestriction(TableMetadata table, VariableSpecifications boundNames, Operator operator)
     {
-        throw invalidRequest("%s cannot be used for multi-column relations", operator());
+        throw invalidRequest("%s cannot be used for multi-column predicates", operator());
     }
 
     @Override
@@ -203,12 +203,12 @@ public class MultiColumnRelation extends Relation
         for (ColumnIdentifier id : getEntities())
         {
             ColumnMetadata def = table.getExistingColumn(id);
-            checkTrue(def.isClusteringColumn(), "Multi-column relations can only be applied to clustering columns but was applied to: %s", def.name);
-            checkFalse(names.contains(def), "Column \"%s\" appeared twice in a relation: %s", def.name, this);
+            checkTrue(def.isClusteringColumn(), "Multi-column predicates can only be applied to clustering columns but was applied to: %s", def.name);
+            checkFalse(names.contains(def), "Column \"%s\" appeared twice in a predicate: %s", def.name, this);
 
             // check that no clustering columns were skipped
             checkFalse(previousPosition != -1 && def.position() != previousPosition + 1,
-                       "Clustering columns must appear in the PRIMARY KEY order in multi-column relations: %s", this);
+                       "Clustering columns must appear in the PRIMARY KEY order in multi-column predicates: %s", this);
 
             names.add(def);
             previousPosition = def.position();
@@ -217,36 +217,34 @@ public class MultiColumnRelation extends Relation
     }
 
     @Override
-    public Relation renameIdentifier(ColumnIdentifier from, ColumnIdentifier to)
+    public ColumnsPredicate renameIdentifier(ColumnIdentifier from, ColumnIdentifier to)
     {
         if (!entities.contains(from))
             return this;
 
         List<ColumnIdentifier> newEntities = entities.stream().map(e -> e.equals(from) ? to : e).collect(Collectors.toList());
-        return new MultiColumnRelation(newEntities, operator(), valuesOrMarker, inValues, inMarker);
+        return new MultiColumnsPredicate(newEntities, operator(), valuesOrMarker, inValues, inMarker);
     }
 
     @Override
-    public String toCQLString()
+    public StringBuilder appendCQL(StringBuilder builder)
     {
-        StringBuilder builder = new StringBuilder(Tuples.tupleToString(entities, ColumnIdentifier::toCQLString));
+        builder.append(Tuples.tupleToString(entities, ColumnIdentifier::toCQLString));
         if (isIN())
         {
             return builder.append(" IN ")
-                          .append(inMarker != null ? '?' : Tuples.tupleToString(inValues))
-                          .toString();
+                          .append(inMarker != null ? '?' : Tuples.tupleToString(inValues));
         }
-        return builder.append(" ")
-                      .append(relationType)
-                      .append(" ")
-                      .append(valuesOrMarker)
-                      .toString();
+        return builder.append(' ')
+                      .append(predicateType)
+                      .append(' ')
+                      .append(valuesOrMarker);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(relationType, entities, valuesOrMarker, inValues, inMarker);
+        return Objects.hash(predicateType, entities, valuesOrMarker, inValues, inMarker);
     }
 
     @Override
@@ -255,12 +253,12 @@ public class MultiColumnRelation extends Relation
         if (this == o)
             return true;
 
-        if (!(o instanceof MultiColumnRelation))
+        if (!(o instanceof MultiColumnsPredicate))
             return false;
 
-        MultiColumnRelation mcr = (MultiColumnRelation) o;
+        MultiColumnsPredicate mcr = (MultiColumnsPredicate) o;
         return Objects.equals(entities, mcr.entities)
-            && Objects.equals(relationType, mcr.relationType)
+            && Objects.equals(predicateType, mcr.predicateType)
             && Objects.equals(valuesOrMarker, mcr.valuesOrMarker)
             && Objects.equals(inValues, mcr.inValues)
             && Objects.equals(inMarker, mcr.inMarker);

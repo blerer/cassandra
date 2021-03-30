@@ -35,13 +35,13 @@ public class SelectMultiColumnRelationTest extends CQLTester
         createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
 
         assertInvalidSyntax("SELECT * FROM %s WHERE () = (?, ?)", 1, 2);
-        assertInvalidMessage("b cannot be restricted by more than one relation if it includes an Equal",
+        assertInvalidMessage("b cannot be restricted by more than one predicate if it includes an Equal",
                              "SELECT * FROM %s WHERE a = 0 AND (b) = (?) AND (b) > (?)", 0, 0);
         assertInvalidMessage("More than one restriction was found for the start bound on b",
                              "SELECT * FROM %s WHERE a = 0 AND (b) > (?) AND (b) > (?)", 0, 1);
         assertInvalidMessage("More than one restriction was found for the start bound on b",
                              "SELECT * FROM %s WHERE a = 0 AND (b) > (?) AND b > ?", 0, 1);
-        assertInvalidMessage("Multi-column relations can only be applied to clustering columns but was applied to: a",
+        assertInvalidMessage("Multi-column predicates can only be applied to clustering columns but was applied to: a",
                              "SELECT * FROM %s WHERE (a, b) = (?, ?)", 0, 0);
     }
 
@@ -57,9 +57,9 @@ public class SelectMultiColumnRelationTest extends CQLTester
                              "SELECT * FROM %s WHERE a = 0 AND (b, c) > (?, ?)", 1, null);
 
         // Wrong order of columns
-        assertInvalidMessage("Clustering columns must appear in the PRIMARY KEY order in multi-column relations: (d, c, b) = (?, ?, ?)",
+        assertInvalidMessage("Clustering columns must appear in the PRIMARY KEY order in multi-column predicates: (d, c, b) = (?, ?, ?)",
                              "SELECT * FROM %s WHERE a = 0 AND (d, c, b) = (?, ?, ?)", 0, 0, 0);
-        assertInvalidMessage("Clustering columns must appear in the PRIMARY KEY order in multi-column relations: (d, c, b) > (?, ?, ?)",
+        assertInvalidMessage("Clustering columns must appear in the PRIMARY KEY order in multi-column predicates: (d, c, b) > (?, ?, ?)",
                              "SELECT * FROM %s WHERE a = 0 AND (d, c, b) > (?, ?, ?)", 0, 0, 0);
 
         // Wrong number of values
@@ -92,26 +92,26 @@ public class SelectMultiColumnRelationTest extends CQLTester
         assertInvalidMessage("Column \"c\" cannot be restricted by two inequalities not starting with the same column",
                              "SELECT * FROM %s WHERE a = 0 AND c > ? AND (b, c, d) < (?, ?, ?)", 1, 1, 1, 0);
 
-        assertInvalidMessage("Multi-column relations can only be applied to clustering columns but was applied to: a",
+        assertInvalidMessage("Multi-column predicates can only be applied to clustering columns but was applied to: a",
                              "SELECT * FROM %s WHERE (a, b, c, d) IN ((?, ?, ?, ?))", 0, 1, 2, 3);
         assertInvalidMessage("PRIMARY KEY column \"c\" cannot be restricted as preceding column \"b\" is not restricted",
                              "SELECT * FROM %s WHERE (c, d) IN ((?, ?))", 0, 1);
 
-        assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ relation)",
+        assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ predicate)",
                              "SELECT * FROM %s WHERE a = ? AND b > ?  AND (c, d) IN ((?, ?))", 0, 0, 0, 0);
 
-        assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ relation)",
+        assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ predicate)",
                              "SELECT * FROM %s WHERE a = ? AND b > ?  AND (c, d) > (?, ?)", 0, 0, 0, 0);
-        assertInvalidMessage("PRIMARY KEY column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ relation)",
+        assertInvalidMessage("PRIMARY KEY column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ predicate)",
                              "SELECT * FROM %s WHERE a = ? AND (c, d) > (?, ?) AND b > ?  ", 0, 0, 0, 0);
 
         assertInvalidMessage("Column \"c\" cannot be restricted by two inequalities not starting with the same column",
                              "SELECT * FROM %s WHERE a = ? AND (b, c) > (?, ?) AND (b) < (?) AND (c) < (?)", 0, 0, 0, 0, 0);
         assertInvalidMessage("Column \"c\" cannot be restricted by two inequalities not starting with the same column",
                              "SELECT * FROM %s WHERE a = ? AND (c) < (?) AND (b, c) > (?, ?) AND (b) < (?)", 0, 0, 0, 0, 0);
-        assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ relation)",
+        assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ predicate)",
                              "SELECT * FROM %s WHERE a = ? AND (b) < (?) AND (c) < (?) AND (b, c) > (?, ?)", 0, 0, 0, 0, 0);
-        assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ relation)",
+        assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ predicate)",
                              "SELECT * FROM %s WHERE a = ? AND (b) < (?) AND c < ? AND (b, c) > (?, ?)", 0, 0, 0, 0, 0);
 
         assertInvalidMessage("Column \"c\" cannot be restricted by two inequalities not starting with the same column",
@@ -299,11 +299,11 @@ public class SelectMultiColumnRelationTest extends CQLTester
     public void testSinglePartitionInvalidQueries() throws Throwable
     {
         createTable("CREATE TABLE %s (a int PRIMARY KEY, b int)");
-        assertInvalidMessage("Multi-column relations can only be applied to clustering columns but was applied to: a",
+        assertInvalidMessage("Multi-column predicates can only be applied to clustering columns but was applied to: a",
                              "SELECT * FROM %s WHERE (a) > (?)", 0);
-        assertInvalidMessage("Multi-column relations can only be applied to clustering columns but was applied to: a",
+        assertInvalidMessage("Multi-column predicates can only be applied to clustering columns but was applied to: a",
                              "SELECT * FROM %s WHERE (a) = (?)", 0);
-        assertInvalidMessage("Multi-column relations can only be applied to clustering columns but was applied to: b",
+        assertInvalidMessage("Multi-column predicates can only be applied to clustering columns but was applied to: b",
                              "SELECT * FROM %s WHERE (b) = (?)", 0);
     }
 
@@ -368,7 +368,7 @@ public class SelectMultiColumnRelationTest extends CQLTester
     public void testNonEqualsRelation() throws Throwable
     {
         createTable("CREATE TABLE %s (a int PRIMARY KEY, b int)");
-        assertInvalidMessage("Unsupported \"!=\" relation: (b) != (0)",
+        assertInvalidMessage("Unsupported \"!=\" predicate: (b) != (0)",
                              "SELECT * FROM %s WHERE a = 0 AND (b) != (0)");
     }
 
@@ -1898,7 +1898,7 @@ public class SelectMultiColumnRelationTest extends CQLTester
     }
 
     /**
-     * Check select on tuple relations, see CASSANDRA-8613
+     * Check select on tuple predicates, see CASSANDRA-8613
      * migrated from cql_tests.py:TestCQL.simple_tuple_query_test()
      */
     @Test

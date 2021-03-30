@@ -39,23 +39,25 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
 /**
- * A relation using the token function.
+ * A predicate using the token function.
+ * <p>
  * Examples:
  * <ul>
- * <li>SELECT ... WHERE token(a) &gt; token(1)</li>
- * <li>SELECT ... WHERE token(a, b) &gt; token(1, 3)</li>
+ * <li>token(a) &gt; token(1)</li>
+ * <li>token(a, b) &gt; token(1, 3)</li>
  * </ul>
+ * </p>
  */
-public final class TokenRelation extends Relation
+public final class TokenPredicate extends ColumnsPredicate
 {
     private final List<ColumnIdentifier> entities;
 
     private final Term.Raw value;
 
-    public TokenRelation(List<ColumnIdentifier> entities, Operator type, Term.Raw value)
+    public TokenPredicate(List<ColumnIdentifier> entities, Operator type, Term.Raw value)
     {
         this.entities = entities;
-        this.relationType = type;
+        this.predicateType = type;
         this.value = value;
     }
 
@@ -130,25 +132,30 @@ public final class TokenRelation extends Relation
     }
 
     @Override
-    public Relation renameIdentifier(ColumnIdentifier from, ColumnIdentifier to)
+    public ColumnsPredicate renameIdentifier(ColumnIdentifier from, ColumnIdentifier to)
     {
         if (!entities.contains(from))
             return this;
 
         List<ColumnIdentifier> newEntities = entities.stream().map(e -> e.equals(from) ? to : e).collect(Collectors.toList());
-        return new TokenRelation(newEntities, operator(), value);
+        return new TokenPredicate(newEntities, operator(), value);
     }
 
     @Override
-    public String toCQLString()
+    public StringBuilder appendCQL(StringBuilder builder)
     {
-        return String.format("token%s %s %s", Tuples.tupleToString(entities, ColumnIdentifier::toCQLString), relationType, value);
+        return builder.append("token")
+                      .append(Tuples.tupleToString(entities, ColumnIdentifier::toCQLString))
+                      .append(' ')
+                      .append(predicateType)
+                      .append(' ')
+                      .append(value);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(relationType, entities, value);
+        return Objects.hash(predicateType, entities, value);
     }
 
     @Override
@@ -157,11 +164,11 @@ public final class TokenRelation extends Relation
         if (this == o)
             return true;
 
-        if (!(o instanceof TokenRelation))
+        if (!(o instanceof TokenPredicate))
             return false;
 
-        TokenRelation tr = (TokenRelation) o;
-        return relationType.equals(tr.relationType) && entities.equals(tr.entities) && value.equals(tr.value);
+        TokenPredicate tr = (TokenPredicate) o;
+        return predicateType.equals(tr.predicateType) && entities.equals(tr.entities) && value.equals(tr.value);
     }
 
     /**
@@ -180,12 +187,12 @@ public final class TokenRelation extends Relation
     }
 
     /**
-     * Returns the receivers for this relation.
+     * Returns the receivers for this predicate.
      *
      * @param table the table meta data
      * @param columnDefs the column definitions
-     * @return the receivers for the specified relation.
-     * @throws InvalidRequestException if the relation is invalid
+     * @return the receivers for the specified predicate.
+     * @throws InvalidRequestException if the predicate is invalid
      */
     private static List<? extends ColumnSpecification> toReceivers(TableMetadata table,
                                                                    List<ColumnMetadata> columnDefs)

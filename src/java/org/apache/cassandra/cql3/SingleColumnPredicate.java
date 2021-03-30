@@ -38,22 +38,22 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
 /**
- * Relations encapsulate the relationship between an entity of some kind, and
- * a value (term). For example, {@code <key> > "start" or "colname1" = "somevalue"}.
+ * A predicate on the value of a column within the {@code WHERE} clause.
+ * <p>For example, {@code <key> > "start" or "colname1" = "somevalue"}.</p>
  *
  */
-public final class SingleColumnRelation extends Relation
+public final class SingleColumnPredicate extends ColumnsPredicate
 {
     private final ColumnIdentifier entity;
     private final Term.Raw mapKey;
     private final Term.Raw value;
     private final List<Term.Raw> inValues;
 
-    private SingleColumnRelation(ColumnIdentifier entity, Term.Raw mapKey, Operator type, Term.Raw value, List<Term.Raw> inValues)
+    private SingleColumnPredicate(ColumnIdentifier entity, Term.Raw mapKey, Operator type, Term.Raw value, List<Term.Raw> inValues)
     {
         this.entity = entity;
         this.mapKey = mapKey;
-        this.relationType = type;
+        this.predicateType = type;
         this.value = value;
         this.inValues = inValues;
 
@@ -62,26 +62,26 @@ public final class SingleColumnRelation extends Relation
     }
 
     /**
-     * Creates a new relation.
+     * Creates a new predicate.
      *
-     * @param entity the kind of relation this is; what the term is being compared to.
+     * @param entity the kind of predicate this is; what the term is being compared to.
      * @param mapKey the key into the entity identifying the value the term is being compared to.
      * @param type the type that describes how this entity relates to the value.
      * @param value the value being compared.
      */
-    public SingleColumnRelation(ColumnIdentifier entity, Term.Raw mapKey, Operator type, Term.Raw value)
+    public SingleColumnPredicate(ColumnIdentifier entity, Term.Raw mapKey, Operator type, Term.Raw value)
     {
         this(entity, mapKey, type, value, null);
     }
 
     /**
-     * Creates a new relation.
+     * Creates a new predicate.
      *
-     * @param entity the kind of relation this is; what the term is being compared to.
+     * @param entity the kind of predicate this is; what the term is being compared to.
      * @param type the type that describes how this entity relates to the value.
      * @param value the value being compared.
      */
-    public SingleColumnRelation(ColumnIdentifier entity, Operator type, Term.Raw value)
+    public SingleColumnPredicate(ColumnIdentifier entity, Operator type, Term.Raw value)
     {
         this(entity, null, type, value);
     }
@@ -96,9 +96,9 @@ public final class SingleColumnRelation extends Relation
         return inValues;
     }
 
-    public static SingleColumnRelation createInRelation(ColumnIdentifier entity, List<Term.Raw> inValues)
+    public static SingleColumnPredicate createInPredicate(ColumnIdentifier entity, List<Term.Raw> inValues)
     {
-        return new SingleColumnRelation(entity, null, Operator.IN, null, inValues);
+        return new SingleColumnPredicate(entity, null, Operator.IN, null, inValues);
     }
 
     public ColumnIdentifier getEntity()
@@ -125,40 +125,43 @@ public final class SingleColumnRelation extends Relation
         return term;
     }
 
-    public SingleColumnRelation withNonStrictOperator()
+    public SingleColumnPredicate withNonStrictOperator()
     {
-        switch (relationType)
+        switch (predicateType)
         {
-            case GT: return new SingleColumnRelation(entity, Operator.GTE, value);
-            case LT: return new SingleColumnRelation(entity, Operator.LTE, value);
+            case GT: return new SingleColumnPredicate(entity, Operator.GTE, value);
+            case LT: return new SingleColumnPredicate(entity, Operator.LTE, value);
             default: return this;
         }
     }
 
-    public Relation renameIdentifier(ColumnIdentifier from, ColumnIdentifier to)
+    public ColumnsPredicate renameIdentifier(ColumnIdentifier from, ColumnIdentifier to)
     {
         return entity.equals(from)
-               ? new SingleColumnRelation(to, mapKey, operator(), value, inValues)
+               ? new SingleColumnPredicate(to, mapKey, operator(), value, inValues)
                : this;
     }
 
     @Override
-    public String toCQLString()
+    public StringBuilder appendCQL(StringBuilder builder)
     {
         String entityAsString = entity.toCQLString();
         if (mapKey != null)
             entityAsString = String.format("%s[%s]", entityAsString, mapKey);
 
         if (isIN())
-            return String.format("%s IN %s", entityAsString, Tuples.tupleToString(inValues));
+        {
+            builder.append(entityAsString).append(" IN ");
+            return inValues == null ? builder.append(value) : builder.append(Tuples.tupleToString(inValues));
+        }
 
-        return String.format("%s %s %s", entityAsString, relationType, value);
+        return builder.append(entityAsString).append(' ').append(predicateType).append(' ').append(value);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(relationType, entity, mapKey, value, inValues);
+        return Objects.hash(predicateType, entity, mapKey, value, inValues);
     }
 
     @Override
@@ -167,12 +170,12 @@ public final class SingleColumnRelation extends Relation
         if (this == o)
             return true;
 
-        if (!(o instanceof SingleColumnRelation))
+        if (!(o instanceof SingleColumnPredicate))
             return false;
 
-        SingleColumnRelation scr = (SingleColumnRelation) o;
+        SingleColumnPredicate scr = (SingleColumnPredicate) o;
         return Objects.equals(entity, scr.entity)
-            && Objects.equals(relationType, scr.relationType)
+            && Objects.equals(predicateType, scr.predicateType)
             && Objects.equals(mapKey, scr.mapKey)
             && Objects.equals(value, scr.value)
             && Objects.equals(inValues, scr.inValues);
@@ -248,7 +251,7 @@ public final class SingleColumnRelation extends Relation
     {
         ColumnMetadata columnDef = table.getExistingColumn(entity);
         // currently enforced by the grammar
-        assert value == Constants.NULL_LITERAL : "Expected null literal for IS NOT relation: " + this.toString();
+        assert value == Constants.NULL_LITERAL : "Expected null literal for IS NOT predicate: " + this.toString();
         return new SingleColumnRestriction.IsNotNullRestriction(columnDef);
     }
 
@@ -265,10 +268,10 @@ public final class SingleColumnRelation extends Relation
     }
 
     /**
-     * Returns the receivers for this relation.
+     * Returns the receivers for this predicate.
      * @param columnDef the column definition
-     * @return the receivers for the specified relation.
-     * @throws InvalidRequestException if the relation is invalid
+     * @return the receivers for the specified predicate.
+     * @throws InvalidRequestException if the predicate is invalid
      */
     private List<? extends ColumnSpecification> toReceivers(ColumnMetadata columnDef) throws InvalidRequestException
     {
@@ -292,20 +295,20 @@ public final class SingleColumnRelation extends Relation
             checkFalse(receiver.type instanceof ListType, "Indexes on list entries (%s[index] = value) are not currently supported.", receiver.name);
             checkTrue(receiver.type instanceof MapType, "Column %s cannot be used as a map", receiver.name);
             checkTrue(receiver.type.isMultiCell(), "Map-entry equality predicates on frozen map column %s are not supported", receiver.name);
-            checkTrue(isEQ(), "Only EQ relations are supported on map entries");
+            checkTrue(isEQ(), "Only EQ predicates are supported on map entries");
         }
 
         // Non-frozen UDTs don't support any operator
         checkFalse(receiver.type.isUDT() && receiver.type.isMultiCell(),
-                   "Non-frozen UDT column '%s' (%s) cannot be restricted by any relation",
+                   "Non-frozen UDT column '%s' (%s) cannot be restricted by any predicate",
                    receiver.name,
                    receiver.type.asCQL3Type());
 
         if (receiver.type.isCollection())
         {
-            // We don't support relations against entire collections (unless they're frozen), like "numbers = {1, 2, 3}"
-            checkFalse(receiver.type.isMultiCell() && !isLegalRelationForNonFrozenCollection(),
-                       "Collection column '%s' (%s) cannot be restricted by a '%s' relation",
+            // We don't support predicates against entire collections (unless they're frozen), like "numbers = {1, 2, 3}"
+            checkFalse(receiver.type.isMultiCell() && !isLegalPredicateForNonFrozenCollection(),
+                       "Collection column '%s' (%s) cannot be restricted by a '%s' predicate",
                        receiver.name,
                        receiver.type.asCQL3Type(),
                        operator());
@@ -331,7 +334,7 @@ public final class SingleColumnRelation extends Relation
         return ((CollectionType<?>) receiver.type).makeCollectionReceiver(receiver, forKey);
     }
 
-    private boolean isLegalRelationForNonFrozenCollection()
+    private boolean isLegalPredicateForNonFrozenCollection()
     {
         return isContainsKey() || isContains() || isMapEntryEquality();
     }

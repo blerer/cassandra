@@ -40,6 +40,20 @@ import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
  */
 public class SelectTest extends CQLTester
 {
+    @Test
+    public void testSelectWithParentheseInWhereClause() throws Throwable
+    {
+        createTable("CREATE TABLE %s (p text, c1 text, c2 int, v text, PRIMARY KEY (p, c1, c2))");
+
+        execute("INSERT INTO %s(p, c1, c2, v) values (?, ?, ?, ?)", "p1", "k1", 1, "v1");
+        execute("INSERT INTO %s(p, c1, c2, v) values (?, ?, ?, ?)", "p1", "k2", 1, "v2");
+
+        assertRows(execute("SELECT * FROM %s WHERE (p=? AND (c1=? AND c2=?) )", "p1", "k2", 1),
+                   row("p1", "k2", 1, "v2"));
+
+        assertRows(execute("SELECT * FROM %s WHERE p=? AND ((c1=?) AND c2=?)", "p1", "k2", 1),
+                row("p1", "k2", 1, "v2"));
+    }
 
     @Test
     public void testSingleClustering() throws Throwable
@@ -80,7 +94,7 @@ public class SelectTest extends CQLTester
             row("p2", null, "sv2", null)
         );
 
-        // No order with one relation
+        // No order with one predicate
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c>=?", "p1", "k1"),
             row("p1", "k1", "sv1", "v1"),
@@ -103,7 +117,7 @@ public class SelectTest extends CQLTester
 
         assertEmpty(execute("SELECT * FROM %s WHERE p=? AND c<=?", "p1", "k0"));
 
-        // Ascending with one relation
+        // Ascending with one predicate
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c>=? ORDER BY c ASC", "p1", "k1"),
             row("p1", "k1", "sv1", "v1"),
@@ -126,7 +140,7 @@ public class SelectTest extends CQLTester
 
         assertEmpty(execute("SELECT * FROM %s WHERE p=? AND c<=? ORDER BY c ASC", "p1", "k0"));
 
-        // Descending with one relation
+        // Descending with one predicate
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c>=? ORDER BY c DESC", "p1", "k1"),
             row("p1", "k2", "sv1", "v2"),
@@ -207,7 +221,7 @@ public class SelectTest extends CQLTester
             row("p2", null, "sv2", null)
         );
 
-        // No order with one relation
+        // No order with one predicate
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c>=?", "p1", "k1"),
             row("p1", "k2", "sv1", "v2"),
@@ -230,7 +244,7 @@ public class SelectTest extends CQLTester
 
         assertEmpty(execute("SELECT * FROM %s WHERE p=? AND c<=?", "p1", "k0"));
 
-        // Ascending with one relation
+        // Ascending with one predicate
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c>=? ORDER BY c ASC", "p1", "k1"),
             row("p1", "k1", "sv1", "v1"),
@@ -253,7 +267,7 @@ public class SelectTest extends CQLTester
 
         assertEmpty(execute("SELECT * FROM %s WHERE p=? AND c<=? ORDER BY c ASC", "p1", "k0"));
 
-        // Descending with one relation
+        // Descending with one predicate
 
         assertRows(execute("SELECT * FROM %s WHERE p=? AND c>=? ORDER BY c DESC", "p1", "k1"),
             row("p1", "k2", "sv1", "v2"),
@@ -1827,7 +1841,7 @@ public class SelectTest extends CQLTester
                     row(11, 15, 16, 17, 18));
 
             assertInvalidMessage(
-                    "Clustering column \"d\" cannot be restricted (preceding column \"c\" is restricted by a non-EQ relation)",
+                    "Clustering column \"d\" cannot be restricted (preceding column \"c\" is restricted by a non-EQ predicate)",
                     "SELECT * FROM %s WHERE a = 11 AND b = 12 AND c > 13 AND d = 14");
 
             assertRows(execute("SELECT * FROM %s WHERE a = 11 AND b = 15 AND c = 16 AND d > 16"),
@@ -1836,7 +1850,7 @@ public class SelectTest extends CQLTester
             assertRows(execute("SELECT * FROM %s WHERE a = 11 AND b = 15 AND c > 13 AND d >= 17 ALLOW FILTERING"),
                     row(11, 15, 16, 17, 18));
             assertInvalidMessage(
-                    "Clustering column \"d\" cannot be restricted (preceding column \"c\" is restricted by a non-EQ relation)",
+                    "Clustering column \"d\" cannot be restricted (preceding column \"c\" is restricted by a non-EQ predicate)",
                     "SELECT * FROM %s WHERE a = 11 AND b = 12 AND c > 13 AND d > 17");
 
             assertRows(execute("SELECT * FROM %s WHERE c > 30 AND d >= 34 ALLOW FILTERING"),
@@ -1854,7 +1868,7 @@ public class SelectTest extends CQLTester
                     row(21, 22, 23, 24, 25));
 
             assertInvalidMessage(
-                    "Clustering column \"d\" cannot be restricted (preceding column \"c\" is restricted by a non-EQ relation)",
+                    "Clustering column \"d\" cannot be restricted (preceding column \"c\" is restricted by a non-EQ predicate)",
                     "SELECT * FROM %s WHERE a <= 11 AND c > 15 AND d >= 16");
         });
 
@@ -2024,7 +2038,7 @@ public class SelectTest extends CQLTester
             assertRows(execute("SELECT * FROM %s WHERE a = 11 AND b = 15"),
                        row(11, 15, 16, 17));
 
-            assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ relation)",
+            assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ predicate)",
                                  "SELECT * FROM %s WHERE a = 11 AND b > 12 AND c = 15");
 
             assertRows(execute("SELECT * FROM %s WHERE a = 11 AND b = 15 AND c > 15"),
@@ -2032,22 +2046,22 @@ public class SelectTest extends CQLTester
 
             assertRows(execute("SELECT * FROM %s WHERE a = 11 AND b > 12 AND c > 13 AND d = 17 ALLOW FILTERING"),
                        row(11, 15, 16, 17));
-            assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ relation)",
+            assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ predicate)",
                                  "SELECT * FROM %s WHERE a = 11 AND b > 12 AND c > 13 and d = 17");
 
             assertRows(execute("SELECT * FROM %s WHERE b > 20 AND c > 30 ALLOW FILTERING"),
                        row(31, 32, 33, 34));
-            assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ relation)",
+            assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ predicate)",
                                  "SELECT * FROM %s WHERE b > 20 AND c > 30");
 
             assertRows(execute("SELECT * FROM %s WHERE b > 20 AND c < 30 ALLOW FILTERING"),
                        row(21, 22, 23, 24));
-            assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ relation)",
+            assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ predicate)",
                                  "SELECT * FROM %s WHERE b > 20 AND c < 30");
 
             assertRows(execute("SELECT * FROM %s WHERE b > 20 AND c = 33 ALLOW FILTERING"),
                        row(31, 32, 33, 34));
-            assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ relation)",
+            assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ predicate)",
                                  "SELECT * FROM %s WHERE b > 20 AND c = 33");
 
             assertRows(execute("SELECT * FROM %s WHERE c = 33 ALLOW FILTERING"),
@@ -2111,7 +2125,7 @@ public class SelectTest extends CQLTester
 
             assertRows(execute("SELECT * FROM %s WHERE (b, c) > (20, 30) AND d = 34 ALLOW FILTERING"),
                        row(31, 32, 33, 34, 35));
-            assertInvalidMessage("Clustering column \"d\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ relation)",
+            assertInvalidMessage("Clustering column \"d\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ predicate)",
                                  "SELECT * FROM %s WHERE (b, c) > (20, 30) AND d = 34");
         });
     }
@@ -2163,7 +2177,7 @@ public class SelectTest extends CQLTester
 
             assertRows(execute("SELECT * FROM %s WHERE b > 20 AND c CONTAINS 2 ALLOW FILTERING"),
                        row(21, 22, list(2, 3), 24));
-            assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ relation)",
+            assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ predicate)",
                                  "SELECT * FROM %s WHERE b > 20 AND c CONTAINS 2");
 
             assertRows(execute("SELECT * FROM %s WHERE c CONTAINS 3 ALLOW FILTERING"),
@@ -2181,7 +2195,7 @@ public class SelectTest extends CQLTester
         beforeAndAfterFlush(() -> {
             assertRows(execute("SELECT * FROM %s WHERE b > 20 AND c CONTAINS KEY '2' ALLOW FILTERING"),
                        row(21, 22, map("2", "3"), 24));
-            assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ relation)",
+            assertInvalidMessage("Clustering column \"c\" cannot be restricted (preceding column \"b\" is restricted by a non-EQ predicate)",
                                  "SELECT * FROM %s WHERE b > 20 AND c CONTAINS KEY '2'");
         });
     }

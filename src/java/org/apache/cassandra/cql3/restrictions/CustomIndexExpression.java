@@ -24,7 +24,7 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.schema.TableMetadata;
 
-public class CustomIndexExpression
+public class CustomIndexExpression extends CqlPredicate
 {
     private final ColumnIdentifier valueColId = new ColumnIdentifier("custom index expression", false);
 
@@ -55,15 +55,26 @@ public class CustomIndexExpression
                                         value.bindAndGet(options));
     }
 
-    public String toCQLString()
+    @Override
+    public boolean containsCustomExpressions()
     {
-        return String.format("expr(%s,%s)", targetIndex.toCQLString(), valueRaw.getText());
+        return true;
     }
 
     @Override
-    public String toString()
+    public CqlPredicate renameIdentifier(ColumnIdentifier from, ColumnIdentifier to)
     {
-        return toCQLString();
+        return this;
+    }
+
+    @Override
+    public StringBuilder appendCQL(StringBuilder builder)
+    {
+        return builder.append("expr(")
+                      .append(targetIndex.toCQLString())
+                      .append(", ")
+                      .append(valueRaw.getText())
+                      .append(')');
     }
 
     @Override

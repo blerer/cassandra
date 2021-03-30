@@ -152,7 +152,7 @@ public class UpdateTest extends CQLTester
         assertInvalidSyntax("UPDATE %s SET value = ?, value = ? WHERE partitionKey = ? AND clustering_1 = ?", 7, 0, 1);
 
         // multiple time same primary key element in WHERE clause
-        assertInvalidMessage("clustering_1 cannot be restricted by more than one relation if it includes an Equal",
+        assertInvalidMessage("clustering_1 cannot be restricted by more than one predicate if it includes an Equal",
                              "UPDATE %s SET value = ? WHERE partitionKey = ? AND clustering_1 = ? AND clustering_1 = ?", 7, 0, 1, 1);
 
         // unknown identifiers
@@ -166,7 +166,7 @@ public class UpdateTest extends CQLTester
                              "UPDATE %s SET value = ? WHERE partitionKey = ? AND clustering_3 = ?", 7, 0, 1);
 
         // Invalid operator in the where clause
-        assertInvalidMessage("Only EQ and IN relation are supported on the partition key (unless you use the token() function)",
+        assertInvalidMessage("Only EQ and IN predicate are supported on the partition key (unless you use the token() function)",
                              "UPDATE %s SET value = ? WHERE partitionKey > ? AND clustering_1 = ?", 7, 0, 1);
 
         assertInvalidMessage("Cannot use CONTAINS on non-collection column partitionkey",
@@ -324,7 +324,7 @@ public class UpdateTest extends CQLTester
         assertInvalidSyntax("UPDATE %s SET value = ?, value = ? WHERE partitionKey = ? AND clustering_1 = ? AND clustering_2 = ?", 7, 0, 1, 1);
 
         // multiple time same primary key element in WHERE clause
-        assertInvalidMessage("clustering_1 cannot be restricted by more than one relation if it includes an Equal",
+        assertInvalidMessage("clustering_1 cannot be restricted by more than one predicate if it includes an Equal",
                              "UPDATE %s SET value = ? WHERE partitionKey = ? AND clustering_1 = ? AND clustering_2 = ? AND clustering_1 = ?", 7, 0, 1, 1, 1);
 
         // unknown identifiers
@@ -338,7 +338,7 @@ public class UpdateTest extends CQLTester
                              "UPDATE %s SET value = ? WHERE partitionKey = ? AND clustering_1 = ? AND clustering_3 = ?", 7, 0, 1, 1);
 
         // Invalid operator in the where clause
-        assertInvalidMessage("Only EQ and IN relation are supported on the partition key (unless you use the token() function)",
+        assertInvalidMessage("Only EQ and IN predicate are supported on the partition key (unless you use the token() function)",
                              "UPDATE %s SET value = ? WHERE partitionKey > ? AND clustering_1 = ? AND clustering_2 = ?", 7, 0, 1, 1);
 
         assertInvalidMessage("Cannot use CONTAINS on non-collection column partitionkey",

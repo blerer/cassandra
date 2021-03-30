@@ -26,50 +26,50 @@ import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 
 import org.junit.Test;
 
-public class SelectSingleColumnRelationTest extends CQLTester
+public class SelectSingleColumnPredicateTest extends CQLTester
 {
     @Test
-    public void testInvalidCollectionEqualityRelation() throws Throwable
+    public void testInvalidCollectionEqualityPredicate() throws Throwable
     {
         createTable("CREATE TABLE %s (a int PRIMARY KEY, b set<int>, c list<int>, d map<int, int>)");
         createIndex("CREATE INDEX ON %s (b)");
         createIndex("CREATE INDEX ON %s (c)");
         createIndex("CREATE INDEX ON %s (d)");
 
-        assertInvalidMessage("Collection column 'b' (set<int>) cannot be restricted by a '=' relation",
+        assertInvalidMessage("Collection column 'b' (set<int>) cannot be restricted by a '=' predicate",
                              "SELECT * FROM %s WHERE a = 0 AND b=?", set(0));
-        assertInvalidMessage("Collection column 'c' (list<int>) cannot be restricted by a '=' relation",
+        assertInvalidMessage("Collection column 'c' (list<int>) cannot be restricted by a '=' predicate",
                              "SELECT * FROM %s WHERE a = 0 AND c=?", list(0));
-        assertInvalidMessage("Collection column 'd' (map<int, int>) cannot be restricted by a '=' relation",
+        assertInvalidMessage("Collection column 'd' (map<int, int>) cannot be restricted by a '=' predicate",
                              "SELECT * FROM %s WHERE a = 0 AND d=?", map(0, 0));
     }
 
     @Test
-    public void testInvalidCollectionNonEQRelation() throws Throwable
+    public void testInvalidCollectionNonEQPredicate() throws Throwable
     {
         createTable("CREATE TABLE %s (a int PRIMARY KEY, b set<int>, c int)");
         createIndex("CREATE INDEX ON %s (c)");
         execute("INSERT INTO %s (a, b, c) VALUES (0, {0}, 0)");
 
         // non-EQ operators
-        assertInvalidMessage("Collection column 'b' (set<int>) cannot be restricted by a '>' relation",
+        assertInvalidMessage("Collection column 'b' (set<int>) cannot be restricted by a '>' predicate",
                              "SELECT * FROM %s WHERE c = 0 AND b > ?", set(0));
-        assertInvalidMessage("Collection column 'b' (set<int>) cannot be restricted by a '>=' relation",
+        assertInvalidMessage("Collection column 'b' (set<int>) cannot be restricted by a '>=' predicate",
                              "SELECT * FROM %s WHERE c = 0 AND b >= ?", set(0));
-        assertInvalidMessage("Collection column 'b' (set<int>) cannot be restricted by a '<' relation",
+        assertInvalidMessage("Collection column 'b' (set<int>) cannot be restricted by a '<' predicate",
                              "SELECT * FROM %s WHERE c = 0 AND b < ?", set(0));
-        assertInvalidMessage("Collection column 'b' (set<int>) cannot be restricted by a '<=' relation",
+        assertInvalidMessage("Collection column 'b' (set<int>) cannot be restricted by a '<=' predicate",
                              "SELECT * FROM %s WHERE c = 0 AND b <= ?", set(0));
-        assertInvalidMessage("Collection column 'b' (set<int>) cannot be restricted by a 'IN' relation",
+        assertInvalidMessage("Collection column 'b' (set<int>) cannot be restricted by a 'IN' predicate",
                              "SELECT * FROM %s WHERE c = 0 AND b IN (?)", set(0));
-        assertInvalidMessage("Unsupported \"!=\" relation: b != 5",
+        assertInvalidMessage("Unsupported \"!=\" predicate: b != 5",
                 "SELECT * FROM %s WHERE c = 0 AND b != 5");
         assertInvalidMessage("Unsupported restriction: b IS NOT NULL",
                 "SELECT * FROM %s WHERE c = 0 AND b IS NOT NULL");
     }
 
     @Test
-    public void testClusteringColumnRelations() throws Throwable
+    public void testClusteringColumnPredicates() throws Throwable
     {
         createTable("CREATE TABLE %s (a text, b int, c int, d int, primary key(a, b, c))");
         execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "first", 1, 5, 1);
@@ -139,10 +139,10 @@ public class SelectSingleColumnRelationTest extends CQLTester
 
         assertEmpty(execute("select * from %s where a = ? and c > ? and c < ? and b in (?, ?)", "first", 6, 7, 3, 2));
 
-        assertInvalidMessage("Column \"c\" cannot be restricted by both an equality and an inequality relation",
+        assertInvalidMessage("Column \"c\" cannot be restricted by both an equality and an inequality predicate",
                              "select * from %s where a = ? and c > ? and c = ? and b in (?, ?)", "first", 6, 7, 3, 2);
 
-        assertInvalidMessage("c cannot be restricted by more than one relation if it includes an Equal",
+        assertInvalidMessage("c cannot be restricted by more than one predicate if it includes an Equal",
                              "select * from %s where a = ? and c = ? and c > ?  and b in (?, ?)", "first", 6, 7, 3, 2);
 
         assertRows(execute("select * from %s where a = ? and c in (?, ?) and b in (?, ?) order by b DESC",
@@ -158,7 +158,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testPartitionKeyColumnRelations() throws Throwable
+    public void testPartitionKeyColumnPredicates() throws Throwable
     {
         createTable("CREATE TABLE %s (a text, b int, c int, d int, primary key((a, b), c))");
         execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "first", 1, 1, 1);
@@ -193,18 +193,18 @@ public class SelectSingleColumnRelationTest extends CQLTester
                              "select * from %s where a in (?, ?)", "first", "second");
         assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                              "select * from %s where a = ?", "first");
-        assertInvalidMessage("b cannot be restricted by more than one relation if it includes a IN",
+        assertInvalidMessage("b cannot be restricted by more than one predicate if it includes a IN",
                              "select * from %s where a = ? AND b IN (?, ?) AND b = ?", "first", 2, 2, 3);
-        assertInvalidMessage("b cannot be restricted by more than one relation if it includes an Equal",
+        assertInvalidMessage("b cannot be restricted by more than one predicate if it includes an Equal",
                              "select * from %s where a = ? AND b = ? AND b IN (?, ?)", "first", 2, 2, 3);
-        assertInvalidMessage("a cannot be restricted by more than one relation if it includes a IN",
+        assertInvalidMessage("a cannot be restricted by more than one predicate if it includes a IN",
                              "select * from %s where a IN (?, ?) AND a = ? AND b = ?", "first", "second", "first", 3);
-        assertInvalidMessage("a cannot be restricted by more than one relation if it includes an Equal",
+        assertInvalidMessage("a cannot be restricted by more than one predicate if it includes an Equal",
                              "select * from %s where a = ? AND a IN (?, ?) AND b IN (?, ?)", "first", "second", "first", 2, 3);
     }
 
     @Test
-    public void testClusteringColumnRelationsWithClusteringOrder() throws Throwable
+    public void testClusteringColumnPredicatesWithClusteringOrder() throws Throwable
     {
         createTable("CREATE TABLE %s (a text, b int, c int, d int, primary key(a, b, c)) WITH CLUSTERING ORDER BY (b DESC, c ASC);");
         execute("insert into %s (a, b, c, d) values (?, ?, ?, ?)", "first", 1, 5, 1);
@@ -577,7 +577,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
         createTable("CREATE TABLE %s (a int PRIMARY KEY, b int, c text)");
         assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                              "SELECT * FROM %s WHERE a >= 1 and a < 4");
-        assertInvalidMessage("Multi-column relations can only be applied to clustering columns but was applied to: a",
+        assertInvalidMessage("Multi-column predicates can only be applied to clustering columns but was applied to: a",
                              "SELECT * FROM %s WHERE (a) >= (1) and (a) < (4)");
     }
 
@@ -585,17 +585,17 @@ public class SelectSingleColumnRelationTest extends CQLTester
     public void testInvalidMulticolumnSliceRestrictionOnPartitionKey() throws Throwable
     {
         createTable("CREATE TABLE %s (a int, b int, c text, PRIMARY KEY ((a, b)))");
-        assertInvalidMessage("Multi-column relations can only be applied to clustering columns but was applied to: a",
+        assertInvalidMessage("Multi-column predicates can only be applied to clustering columns but was applied to: a",
                              "SELECT * FROM %s WHERE (a, b) >= (1, 1) and (a, b) < (4, 1)");
-        assertInvalidMessage("Multi-column relations can only be applied to clustering columns but was applied to: a",
+        assertInvalidMessage("Multi-column predicates can only be applied to clustering columns but was applied to: a",
                              "SELECT * FROM %s WHERE a >= 1 and (a, b) < (4, 1)");
-        assertInvalidMessage("Multi-column relations can only be applied to clustering columns but was applied to: a",
+        assertInvalidMessage("Multi-column predicates can only be applied to clustering columns but was applied to: a",
                              "SELECT * FROM %s WHERE b >= 1 and (a, b) < (4, 1)");
-        assertInvalidMessage("Multi-column relations can only be applied to clustering columns but was applied to: a",
+        assertInvalidMessage("Multi-column predicates can only be applied to clustering columns but was applied to: a",
                              "SELECT * FROM %s WHERE (a, b) >= (1, 1) and (b) < (4)");
-        assertInvalidMessage("Multi-column relations can only be applied to clustering columns but was applied to: b",
+        assertInvalidMessage("Multi-column predicates can only be applied to clustering columns but was applied to: b",
                              "SELECT * FROM %s WHERE (b) < (4) and (a, b) >= (1, 1)");
-        assertInvalidMessage("Multi-column relations can only be applied to clustering columns but was applied to: a",
+        assertInvalidMessage("Multi-column predicates can only be applied to clustering columns but was applied to: a",
                              "SELECT * FROM %s WHERE (a, b) >= (1, 1) and a = 1");
     }
 
@@ -617,14 +617,14 @@ public class SelectSingleColumnRelationTest extends CQLTester
     }
 
     @Test
-    public void testInvalidNonFrozenUDTRelation() throws Throwable
+    public void testInvalidNonFrozenUDTPredicate() throws Throwable
     {
         String type = createType("CREATE TYPE %s (a int)");
         createTable("CREATE TABLE %s (a int PRIMARY KEY, b " + type + ")");
         Object udt = userType("a", 1);
 
         // All operators
-        String msg = "Non-frozen UDT column 'b' (" + type + ") cannot be restricted by any relation";
+        String msg = "Non-frozen UDT column 'b' (" + type + ") cannot be restricted by any predicate";
         assertInvalidMessage(msg, "SELECT * FROM %s WHERE b = ?", udt);
         assertInvalidMessage(msg, "SELECT * FROM %s WHERE b > ?", udt);
         assertInvalidMessage(msg, "SELECT * FROM %s WHERE b < ?", udt);
@@ -632,7 +632,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
         assertInvalidMessage(msg, "SELECT * FROM %s WHERE b <= ?", udt);
         assertInvalidMessage(msg, "SELECT * FROM %s WHERE b IN (?)", udt);
         assertInvalidMessage(msg, "SELECT * FROM %s WHERE b LIKE ?", udt);
-        assertInvalidMessage("Unsupported \"!=\" relation: b != {a: 0}",
+        assertInvalidMessage("Unsupported \"!=\" predicate: b != {a: 0}",
                              "SELECT * FROM %s WHERE b != {a: 0}", udt);
         assertInvalidMessage("Unsupported restriction: b IS NOT NULL",
                              "SELECT * FROM %s WHERE b IS NOT NULL", udt);

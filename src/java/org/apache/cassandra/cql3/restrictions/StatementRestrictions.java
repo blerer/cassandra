@@ -45,7 +45,7 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.checkNotNu
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
 /**
- * The restrictions corresponding to the relations specified on the where-clause of CQL query.
+ * The restrictions corresponding to the predicates specified on the where-clause of CQL query.
  */
 public final class StatementRestrictions
 {
@@ -156,14 +156,14 @@ public final class StatementRestrictions
 
         /*
          * WHERE clause. For a given entity, rules are:
-         *   - EQ relation conflicts with anything else (including a 2nd EQ)
-         *   - Can't have more than one LT(E) relation (resp. GT(E) relation)
-         *   - IN relation are restricted to row keys (for now) and conflicts with anything else (we could
+         *   - EQ predicate conflicts with anything else (including a 2nd EQ)
+         *   - Can't have more than one LT(E) predicate (resp. GT(E) predicate)
+         *   - IN predicate are restricted to row keys (for now) and conflicts with anything else (we could
          *     allow two IN for the same entity but that doesn't seem very useful)
          *   - The value_alias cannot be restricted in any way (we don't support wide rows with indexed value
          *     in CQL so far)
          */
-        for (Relation relation : whereClause.relations)
+        for (ColumnsPredicate relation : whereClause.relations)
         {
             if (relation.operator() == Operator.IS_NOT)
             {
@@ -414,7 +414,7 @@ public final class StatementRestrictions
 
             // slice query
             checkFalse(partitionKeyRestrictions.hasSlice(),
-                    "Only EQ and IN relation are supported on the partition key (unless you use the token() function)"
+                    "Only EQ and IN predicate are supported on the partition key (unless you use the token() function)"
                             + " for %s statements", type);
         }
         else
@@ -433,8 +433,8 @@ public final class StatementRestrictions
             // But we still need to know 2 things:
             // - If we don't have a queriable index, is the query ok
             // - Is it queriable without 2ndary index, which is always more efficient
-            // If a component of the partition key is restricted by a relation, all preceding
-            // components must have a EQ. Only the last partition key component can be in IN relation.
+            // If a component of the partition key is restricted by a predicate, all preceding
+            // components must have a EQ. Only the last partition key component can be in IN predicate.
             if (partitionKeyRestrictions.needFiltering(table))
             {
                 if (!allowFiltering && !forView && !hasQueriableIndex)
@@ -785,7 +785,7 @@ public final class StatementRestrictions
             numberOfClusteringColumns = 0;
         }
 
-        // it is a range query if it has at least one the column alias for which no relation is defined or is not EQ or IN.
+        // it is a range query if it has at least one the column alias for which no predicate is defined or is not EQ or IN.
         return clusteringColumnsRestrictions.size() < numberOfClusteringColumns
             || !clusteringColumnsRestrictions.hasOnlyEqualityRestrictions();
     }
@@ -814,9 +814,9 @@ public final class StatementRestrictions
 
     /**
      * Checks that all the primary key columns (partition key and clustering columns) are restricted by an equality
-     * relation ('=' or 'IN').
+     * predicate ('=' or 'IN').
      *
-     * @return <code>true</code> if all the primary key columns are restricted by an equality relation.
+     * @return <code>true</code> if all the primary key columns are restricted by an equality predicate.
      */
     public boolean hasAllPKColumnsRestrictedByEqualities()
     {

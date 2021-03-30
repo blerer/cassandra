@@ -17,30 +17,54 @@
  */
 package org.apache.cassandra.cql3;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-
-import com.google.common.collect.ImmutableList;
+import java.util.Optional;
 
 import org.antlr.runtime.RecognitionException;
 import org.apache.cassandra.cql3.restrictions.CustomIndexExpression;
 
-import static java.lang.String.join;
-
-import static com.google.common.collect.Iterables.concat;
-import static com.google.common.collect.Iterables.transform;
-
 public final class WhereClause
 {
-    private static final WhereClause EMPTY = new WhereClause(new Builder());
+    private static final WhereClause EMPTY = new WhereClause(null);
 
-    public final List<Relation> relations;
+    private final Optional<CqlPredicate> maybePredicates;
+
+    private final boolean containsCustomExpressions;
+
+    public final List<ColumnsPredicate> relations;
     public final List<CustomIndexExpression> expressions;
 
-    private WhereClause(Builder builder)
+    public WhereClause(CqlPredicate predicates)
     {
-        relations = builder.relations.build();
-        expressions = builder.expressions.build();
+        System.out.println(predicates);
+        this.maybePredicates = Optional.ofNullable(predicates);
+        this.containsCustomExpressions = maybePredicates.isPresent() ? predicates.containsCustomExpressions() : false;
+        this.relations = new ArrayList<>();
+        this.expressions = new ArrayList<>();
+        if (maybePredicates.isPresent())
+        {
+            addPredicat(maybePredicates.get(), relations, expressions);
+        }
+    }
+
+    public void addPredicat(CqlPredicate predicate, List<ColumnsPredicate> relations, List<CustomIndexExpression> expessions)
+    {
+        if (predicate instanceof AndPredicate)
+        {
+            AndPredicate and = (AndPredicate) predicate;
+            addPredicat(and.left, relations, expessions);
+            addPredicat(and.right, relations, expessions);
+        }
+        else if (predicate instanceof ColumnsPredicate)
+        {
+            relations.add((ColumnsPredicate) predicate);
+        }
+        else
+        {
+            expessions.add((CustomIndexExpression) predicate);
+        }
     }
 
     public static WhereClause empty()
@@ -50,7 +74,7 @@ public final class WhereClause
 
     public boolean containsCustomExpressions()
     {
-        return !expressions.isEmpty();
+        return containsCustomExpressions;
     }
 
     /**
@@ -61,20 +85,17 @@ public final class WhereClause
      */
     public WhereClause renameIdentifier(ColumnIdentifier from, ColumnIdentifier to)
     {
-        WhereClause.Builder builder = new WhereClause.Builder();
+        if (!maybePredicates.isPresent())
+            return this;
 
-        relations.stream()
-                 .map(r -> r.renameIdentifier(from, to))
-                 .forEach(builder::add);
-
-        expressions.forEach(builder::add);
-
-        return builder.build();
+        CqlPredicate predicates = maybePredicates.get();
+        CqlPredicate newPredicates = predicates.renameIdentifier(from, to);
+        return newPredicates == predicates ? this : new WhereClause(newPredicates);
     }
 
     public static WhereClause parse(String cql) throws RecognitionException
     {
-        return CQLFragmentParser.parseAnyUnhandled(CqlParser::whereClause, cql).build();
+        return CQLFragmentParser.parseAnyUnhandled(CqlParser::whereClause, cql);
     }
 
     @Override
@@ -90,9 +111,7 @@ public final class WhereClause
      */
     public String toCQLString()
     {
-        return join(" AND ",
-                    concat(transform(relations, Relation::toCQLString),
-                           transform(expressions, CustomIndexExpression::toCQLString)));
+        return maybePredicates.isPresent() ? maybePredicates.get().toCQLString() : "";
     }
 
     @Override
@@ -105,35 +124,28 @@ public final class WhereClause
             return false;
 
         WhereClause wc = (WhereClause) o;
-        return relations.equals(wc.relations) && expressions.equals(wc.expressions);
+        return maybePredicates.equals(wc.maybePredicates);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(relations, expressions);
+        return Objects.hash(maybePredicates);
     }
 
     public static final class Builder
     {
-        ImmutableList.Builder<Relation> relations = new ImmutableList.Builder<>();
-        ImmutableList.Builder<CustomIndexExpression> expressions = new ImmutableList.Builder<>();
+        private CqlPredicate predicates;
 
-        public Builder add(Relation relation)
+        public Builder add(CqlPredicate predicate)
         {
-            relations.add(relation);
-            return this;
-        }
-
-        public Builder add(CustomIndexExpression expression)
-        {
-            expressions.add(expression);
+            predicates = predicates == null ? predicate : new AndPredicate(predicates, predicate);
             return this;
         }
 
         public WhereClause build()
         {
-            return new WhereClause(this);
+            return new WhereClause(predicates);
         }
     }
 }

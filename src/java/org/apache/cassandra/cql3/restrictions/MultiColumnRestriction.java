@@ -159,7 +159,7 @@ public abstract class MultiColumnRestriction implements SingleRestriction
         @Override
         public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
-            throw invalidRequest("%s cannot be restricted by more than one relation if it includes an Equal",
+            throw invalidRequest("%s cannot be restricted by more than one predicate if it includes an Equal",
                                  getColumnsInCommons(otherRestriction));
         }
 
@@ -229,7 +229,7 @@ public abstract class MultiColumnRestriction implements SingleRestriction
         @Override
         public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
-            throw invalidRequest("%s cannot be restricted by more than one relation if it includes a IN",
+            throw invalidRequest("%s cannot be restricted by more than one predicate if it includes a IN",
                                  getColumnsInCommons(otherRestriction));
         }
 
@@ -446,7 +446,7 @@ public abstract class MultiColumnRestriction implements SingleRestriction
         public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
             checkTrue(otherRestriction.isSlice(),
-                      "Column \"%s\" cannot be restricted by both an equality and an inequality relation",
+                      "Column \"%s\" cannot be restricted by both an equality and an inequality predicate",
                       getColumnsInCommons(otherRestriction));
 
             if (!getFirstColumn().equals(otherRestriction.getFirstColumn()))
@@ -541,7 +541,7 @@ public abstract class MultiColumnRestriction implements SingleRestriction
         @Override
         public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
-            throw invalidRequest("%s cannot be restricted by a relation if it includes an IS NOT NULL clause",
+            throw invalidRequest("%s cannot be restricted by a predicate if it includes an IS NOT NULL clause",
                                  getColumnsInCommons(otherRestriction));
         }
 

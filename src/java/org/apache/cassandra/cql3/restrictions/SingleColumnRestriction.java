@@ -175,7 +175,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
-            throw invalidRequest("%s cannot be restricted by more than one relation if it includes an Equal", columnDef.name);
+            throw invalidRequest("%s cannot be restricted by more than one predicate if it includes an Equal", columnDef.name);
         }
 
         @Override
@@ -201,7 +201,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public final SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
-            throw invalidRequest("%s cannot be restricted by more than one relation if it includes a IN", columnDef.name);
+            throw invalidRequest("%s cannot be restricted by more than one predicate if it includes a IN", columnDef.name);
         }
 
         @Override
@@ -370,7 +370,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
             checkTrue(otherRestriction.isSlice(),
-                      "Column \"%s\" cannot be restricted by both an equality and an inequality relation",
+                      "Column \"%s\" cannot be restricted by both an equality and an inequality predicate",
                       columnDef.name);
 
             SingleColumnRestriction.SliceRestriction otherSlice = (SingleColumnRestriction.SliceRestriction) otherRestriction;
@@ -636,7 +636,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
-            throw invalidRequest("%s cannot be restricted by a relation if it includes an IS NOT NULL", columnDef.name);
+            throw invalidRequest("%s cannot be restricted by a predicate if it includes an IS NOT NULL", columnDef.name);
         }
 
         @Override
@@ -721,7 +721,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
-            throw invalidRequest("%s cannot be restricted by more than one relation if it includes a %s", columnDef.name, operator);
+            throw invalidRequest("%s cannot be restricted by more than one predicate if it includes a %s", columnDef.name, operator);
         }
 
         @Override
