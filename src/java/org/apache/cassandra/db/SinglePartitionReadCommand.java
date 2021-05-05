@@ -771,7 +771,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
 
     private boolean queriesMulticellType()
     {
-        for (ColumnMetadata column : columnFilter().fetchedColumns())
+        for (ColumnMetadata column : columnFilter().queriedColumns())
         {
             if (column.type.isMultiCell() || column.type.isCounter())
                 return true;
@@ -925,12 +925,12 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
         }
     }
 
-    private ClusteringIndexNamesFilter reduceFilter(ClusteringIndexNamesFilter filter, Partition result, long sstableTimestamp)
+    private ClusteringIndexNamesFilter reduceFilter(ClusteringIndexNamesFilter filter, ImmutableBTreePartition result, long sstableTimestamp)
     {
         if (result == null)
             return filter;
 
-        RegularAndStaticColumns columns = columnFilter().fetchedColumns();
+        RegularAndStaticColumns columns = columnFilter().queriedColumns();
         NavigableSet<Clustering<?>> clusterings = filter.requestedRows();
 
         // We want to remove rows for which we have values for all requested columns. We have to deal with both static and regular rows.
@@ -945,6 +945,23 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
         }
 
         NavigableSet<Clustering<?>> toRemove = null;
+
+        DeletionInfo deletionInfo = result.deletionInfo();
+
+        if (deletionInfo.hasRanges())
+        {
+            for (Clustering<?> clustering : clusterings)
+            {
+                RangeTombstone rt = deletionInfo.rangeCovering(clustering);
+                if (rt != null && rt.deletionTime().deletes(sstableTimestamp))
+                {
+                    if (toRemove == null)
+                        toRemove = new TreeSet<>(result.metadata().comparator);
+                    toRemove.add(clustering);
+                }
+            } 
+        }
+
         try (UnfilteredRowIterator iterator = result.unfilteredIterator(columnFilter(), clusterings, false))
         {
             while (iterator.hasNext())
@@ -995,6 +1012,9 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
      */
     private boolean isRowComplete(Row row, Columns requestedColumns, long sstableTimestamp)
     {
+        if (!row.deletion().isLive() && row.deletion().time().deletes(sstableTimestamp))
+            return true;
+
         // Note that compact tables will always have an empty primary key liveness info.
         if (!row.primaryKeyLivenessInfo().isEmpty() && row.primaryKeyLivenessInfo().timestamp() <= sstableTimestamp)
             return false;
@@ -1008,7 +1028,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
             if (cell == null || cell.timestamp() <= sstableTimestamp)
                 return false;
 
-            if (!cell.isTombstone())
+            if (!cell.isTombstone() || !row.primaryKeyLivenessInfo().isEmpty())
                 hasLiveCell = true;
         }
 
