@@ -18,10 +18,16 @@
 package org.apache.cassandra.db.virtual;
 
 import java.nio.ByteBuffer;
+import java.util.Optional;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.BoundType;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Range;
 
+import org.apache.commons.lang.ArrayUtils;
+
+import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringBound;
 import org.apache.cassandra.db.ClusteringPrefix;
 import org.apache.cassandra.db.DecoratedKey;
@@ -29,11 +35,11 @@ import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Cell;
-import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
-import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
+import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
 /**
  * An abstract virtual table implementation that builds the resultset on demand and allows fine-grained source
@@ -48,40 +54,40 @@ public abstract class AbstractMutableVirtualTable extends AbstractVirtualTable
     }
 
     @Override
-    public void apply(PartitionUpdate update)
+    public final void apply(PartitionUpdate update)
     {
-        Object[] partitionKeyColumnValues = extractPartitionKeyColumnValues(update.partitionKey());
+        ColumnValues partitionKey = ColumnValues.from(metadata(), update.partitionKey());
 
         if (update.deletionInfo().isLive())
             update.forEach(row ->
             {
-                Comparable<?>[] clusteringColumnValues = extractClusteringColumnValues(row.clustering());
+                ColumnValues clusteringColumns = ColumnValues.from(metadata(), row.clustering());
 
                 if (row.deletion().isLive())
                 {
                     if (row.columnCount() == 0)
-                        applyRowWithoutRegularColumnsInsertion(partitionKeyColumnValues, clusteringColumnValues);
-                     else
-                     {
+                    {
+                        applyColumnUpdate(partitionKey, clusteringColumns, Optional.empty());
+                    }
+                    else
+                    {
                         row.forEach(columnData ->
                         {
-                            checkFalse(columnData.column().isComplex(), "Complex type columns are not supported by table " + metadata);
+                            checkFalse(columnData.column().isComplex(), "Complex type columns are not supported by table %s", metadata);
 
                             Cell<?> cell = (Cell<?>) columnData;
-                            String columnName = extractColumnName(cell);
 
                             if (cell.isTombstone())
-                                applyColumnDeletion(partitionKeyColumnValues, clusteringColumnValues, columnName);
+                                applyColumnDeletion(partitionKey, clusteringColumns, columnName(cell));
                             else
-                                applyColumnUpdate(partitionKeyColumnValues,
-                                        clusteringColumnValues,
-                                        columnName,
-                                        extractColumnValue(cell));
+                                applyColumnUpdate(partitionKey,
+                                        clusteringColumns,
+                                        Optional.of(ColumnValue.from(cell)));
                         });
                     }
                 }
                 else
-                    applyRowDeletion(partitionKeyColumnValues, clusteringColumnValues);
+                    applyRowDeletion(partitionKey, clusteringColumns);
             });
         else
         {
@@ -89,43 +95,51 @@ public abstract class AbstractMutableVirtualTable extends AbstractVirtualTable
             if (update.deletionInfo().hasRanges())
                 update.deletionInfo()
                         .rangeIterator(false)
-                        .forEachRemaining(rt -> convertAndApplyRangeTombstone(partitionKeyColumnValues, rt.deletedSlice()));
+                        .forEachRemaining(rt -> convertAndApplyRangeTombstone(partitionKey, rt.deletedSlice()));
 
             if (!update.deletionInfo().getPartitionDeletion().isLive())
-                applyPartitionDeletion(partitionKeyColumnValues);
+                applyPartitionDeletion(partitionKey);
         }
     }
 
-    protected void applyPartitionDeletion(Object[] partitionKeyColumnValues)
+    protected void applyPartitionDeletion(ColumnValues partitionKey)
     {
-        throw new InvalidRequestException("Partition deletion is not supported by table " + metadata);
-
+        throw invalidRequest("Partition deletion is not supported by table %s", metadata);
     }
 
-    private void convertAndApplyRangeTombstone(Object[] partitionKeyColumnValues, Slice slice)
+    private void convertAndApplyRangeTombstone(ColumnValues partitionKey, Slice slice)
     {
-        ClusteringBound<?> startClusteringColumns = slice.start();
-        Comparable<?>[] startClusteringColumnValues = extractClusteringColumnValues(startClusteringColumns);
-        BoundType startClusteringColumnBoundType = startClusteringColumns.isInclusive() ? BoundType.CLOSED : BoundType.OPEN;
+        applyRangeTombstone(partitionKey, toRange(slice));
+    }
 
-        ClusteringBound<?> endClusteringColumns = slice.end();
-        Comparable<?>[] endClusteringColumnValues = extractClusteringColumnValues(endClusteringColumns);
-        BoundType endClusteringColumnBoundType = endClusteringColumns.isInclusive() ? BoundType.CLOSED : BoundType.OPEN;
+    private Range<ColumnValues> toRange(Slice slice)
+    {
+        ClusteringBound<?> startBound = slice.start();
+        ClusteringBound<?> endBound = slice.end();
 
-        int clusteringColumnsPrefixLength = Math.max(startClusteringColumnValues.length, endClusteringColumnValues.length) - 1;
-        Comparable<?>[] clusteringColumnValuesPrefix = new Comparable<?>[clusteringColumnsPrefixLength];
-        System.arraycopy(startClusteringColumnValues, 0, clusteringColumnValuesPrefix, 0, clusteringColumnsPrefixLength);
+        if (startBound.isBottom())
+        {
+            if (endBound.isTop())
+                return Range.all();
 
-        Range<Comparable<?>> range;
-        if (startClusteringColumnValues.length < endClusteringColumnValues.length)
-            range = Range.upTo(endClusteringColumnValues[endClusteringColumnValues.length - 1], endClusteringColumnBoundType);
-        else if (startClusteringColumnValues.length > endClusteringColumnValues.length)
-            range = Range.downTo(startClusteringColumnValues[startClusteringColumnValues.length - 1], startClusteringColumnBoundType);
-        else
-            range = Range.range(startClusteringColumnValues[startClusteringColumnValues.length - 1], startClusteringColumnBoundType,
-                    endClusteringColumnValues[endClusteringColumnValues.length - 1], endClusteringColumnBoundType);
+            return Range.upTo(ColumnValues.from(metadata(), endBound), boundType(endBound));
+        }
 
-        applyRangeTombstone(partitionKeyColumnValues, clusteringColumnValuesPrefix, range);
+        if (endBound.isTop())
+            return Range.downTo(ColumnValues.from(metadata(), startBound), boundType(startBound));
+
+        ColumnValues start = ColumnValues.from(metadata(), startBound);
+        BoundType startType = boundType(startBound);
+
+        ColumnValues end = ColumnValues.from(metadata(), endBound);
+        BoundType endType = boundType(endBound);
+
+        return Range.range(start, startType, end, endType);
+    }
+
+    private static BoundType boundType(ClusteringBound<?> bound)
+    {
+        return bound.isInclusive() ? BoundType.CLOSED : BoundType.OPEN;
     }
 
     /**
@@ -140,72 +154,260 @@ public abstract class AbstractMutableVirtualTable extends AbstractVirtualTable
      * @param clusteringColumnValuesPrefix is an array (it may be empty!) of clustering columns with equality condition
      * @param range is a range of values for the last clustering column
      */
-    protected void applyRangeTombstone(Object[] partitionKeyColumnValues,
-                                       Comparable<?>[] clusteringColumnValuesPrefix,
-                                       Range<Comparable<?>> range)
+    protected void applyRangeTombstone(ColumnValues partitionKey,
+                                       Range<ColumnValues> range)
     {
-        throw new InvalidRequestException("Range deletion is not supported by table " + metadata);
+        throw invalidRequest("Range deletion is not supported by table %s", metadata);
     }
 
-    protected void applyRowWithoutRegularColumnsInsertion(Object[] partitionKeyColumnValues, Comparable<?>[] clusteringColumnValues)
+    protected void applyRowDeletion(ColumnValues partitionKey, ColumnValues clusteringColumnValues)
     {
-        throw new InvalidRequestException("Row insertion is not supported by table " + metadata);
+        throw invalidRequest("Row deletion is not supported by table %s", metadata);
     }
 
-    protected void applyRowDeletion(Object[] partitionKeyColumnValues, Comparable<?>[] clusteringColumnValues)
+    protected void applyColumnDeletion(ColumnValues partitionKey, ColumnValues clusteringColumns, String columnName)
     {
-        throw new InvalidRequestException("Row deletion is not supported by table " + metadata);
+        throw invalidRequest("Column deletion is not supported by table %s", metadata);
     }
 
-    protected void applyColumnDeletion(Object[] partitionKeyColumnValues, Comparable<?>[] clusteringColumnValues, String columnName)
+    protected void applyColumnUpdate(ColumnValues partitionKey,
+                                     ColumnValues clusteringColumns,
+                                     Optional<ColumnValue> columnValue)
     {
-        throw new InvalidRequestException("Column deletion is not supported by table " + metadata);
+        throw invalidRequest("Column modification is not supported by table %s", metadata);
     }
 
-    protected void applyColumnUpdate(Object[] partitionKeyColumnValues, Comparable<?>[] clusteringColumnValues,
-                                              String columnName, Object columnValue)
-    {
-        throw new InvalidRequestException("Column modification is not supported by table " + metadata);
-    }
-
-    private Object[] extractPartitionKeyColumnValues(DecoratedKey partitionKey)
-    {
-        if (metadata.partitionKeyType instanceof CompositeType)
-        {
-            ByteBuffer[] partitionKeyColumnBytes = ((CompositeType) metadata.partitionKeyType).split(partitionKey.getKey());
-            Object[] partitionKeyColumnValues = new Object[partitionKeyColumnBytes.length];
-            for (int i = 0; i < partitionKeyColumnValues.length; i++)
-            {
-                partitionKeyColumnValues[i] = metadata.partitionKeyColumns().get(i).type.compose(partitionKeyColumnBytes[i]);
-            }
-            return partitionKeyColumnValues;
-
-        }
-        else
-            return new Object[]{metadata.partitionKeyType.compose(partitionKey.getKey())};
-    }
-
-    private Comparable<?>[] extractClusteringColumnValues(ClusteringPrefix<?> clusteringColumns)
-    {
-        // clusteringColumns.size() may be less than metadata.clusteringColumns().size() since not all clustering
-        // columns have to be always specified
-        Comparable<?>[] clusteringColumnValues = new Comparable<?>[clusteringColumns.size()];
-        for (int i = 0; i < clusteringColumnValues.length; i++)
-        {
-            Object clusteringColumnValue = metadata.clusteringColumns().get(i).type.compose(clusteringColumns.bufferAt(i));
-            checkTrue(clusteringColumnValue instanceof Comparable, "Non-comparable types are not supported as clustering columns by table " + metadata);
-            clusteringColumnValues[i] = (Comparable<?>) clusteringColumnValue;
-        }
-        return clusteringColumnValues;
-    }
-
-    private String extractColumnName(Cell<?> cell)
+    private static String columnName(Cell<?> cell)
     {
         return cell.column().name.toCQLString();
     }
 
-    private Object extractColumnValue(Cell<?> cell)
+    /**
+     * A set of partition key or clustering column values.
+     */
+    public static final class ColumnValues implements Comparable<ColumnValues>
     {
-        return cell.column().cellValueType().compose(cell.buffer());
+        /**
+         * An empty set of column values.
+         */
+        private static final ColumnValues EMPTY = new ColumnValues(ImmutableList.of(), ArrayUtils.EMPTY_OBJECT_ARRAY);
+
+        /**
+         * The column metadata for the set of columns.
+         */
+        private final ImmutableList<ColumnMetadata> metadata;
+
+        /**
+         * The column values. The number of values can be smaller than the number of values if only
+         * a sub-set of the column values is specified (e.g. clustering prefix).
+         */
+        private final Object[] values;
+
+        /**
+         * Returns the set of column values corresponding to the specified partition key.
+         *
+         * @param metadata the table metadata
+         * @param partitionKey the partition key
+         * @return the set of columns values corresponding to the specified partition key
+         */
+        public static ColumnValues from(TableMetadata metadata, DecoratedKey partitionKey)
+        {
+            if (metadata.partitionKeyType instanceof CompositeType)
+            {
+                ByteBuffer[] buffers= ((CompositeType) metadata.partitionKeyType).split(partitionKey.getKey());
+                return ColumnValues.from(metadata.partitionKeyColumns(), buffers);
+            }
+
+            return ColumnValues.from(metadata.partitionKeyColumns(), partitionKey.getKey());
+        }
+
+        /**
+         * Returns the set of column values corresponding to the specified clustering prefix.
+         *
+         * @param metadata the table metadata
+         * @param prefix the clustering prefix
+         * @return the set of columns values corresponding to the specified clustering prefix
+         */
+        public static ColumnValues from(TableMetadata metadata, ClusteringPrefix<?> prefix)
+        {
+            if (prefix == Clustering.EMPTY)
+                return EMPTY;
+
+            return ColumnValues.from(metadata.clusteringColumns(), prefix.getBufferArray());
+        }
+
+        private static ColumnValues from(ImmutableList<ColumnMetadata> metadata, ByteBuffer... buffers)
+        {
+            return new ColumnValues(metadata, convert(metadata, buffers));
+        }
+
+        /**
+         * Create a {@code ColumnValues} for the specified set of columns.
+         *
+         * @param metadata the partition or clustering columns metadata
+         * @param values the partition or clustering column values
+         */
+        public ColumnValues(ImmutableList<ColumnMetadata> metadata, Object... values)
+        {
+            this.metadata = metadata;
+            this.values = values;
+        }
+
+        /**
+         * Deserializes the column values.
+         *
+         * @param metadata the column metadata
+         * @param buffers the serialized column values
+         * @return the deserialized column values
+         */
+        private static Object[] convert(ImmutableList<ColumnMetadata> metadata, ByteBuffer[] buffers)
+        {
+            Object[] values = new Object[buffers.length];
+            for (int i = 0; i < buffers.length; i++)
+            {
+                values[i] = metadata.get(i).type.compose(buffers[i]);
+            }
+            return values;
+        }
+
+        /**
+         * Returns the name of the specified column
+         *
+         * @param i the column index
+         * @return the column name
+         */
+        public String name(int i)
+        {
+            Preconditions.checkPositionIndex(i, values.length);
+            return metadata.get(i).name.toCQLString();
+        }
+
+        /**
+         * Returns the value for the specified column
+         *
+         * @param i the column index
+         * @return the column value
+         */
+        @SuppressWarnings("unchecked")
+        public <V> V value(int i)
+        {
+            Preconditions.checkPositionIndex(i, values.length);
+            return (V) values[i];
+        }
+
+        /**
+         * Returns the number of column values.
+         *
+         * @return the number of column values.
+         */
+        public int size()
+        {
+            return values.length;
+        }
+
+        @Override
+        public String toString()
+        {
+            StringBuilder builder = new StringBuilder();
+            builder.append('[');
+            for (int i = 0, m = metadata.size(); i <m; i++)
+            {
+                if (i != 0)
+                    builder.append(", ");
+
+                builder.append(metadata.get(i).name.toCQLString())
+                       .append(" : ");
+
+                if (i < values.length)
+                       builder.append(i < values.length ? values[i].toString() : "unspecified");
+            }
+            return builder.append(']').toString();
+        }
+
+        @Override
+        public int compareTo(ColumnValues o)
+        {
+            assert metadata.equals(o.metadata);
+
+            int s1 = size();
+            int s2 = o.size();
+            int minSize = Math.min(s1, s2);
+
+            for (int i = 0; i < minSize; i++)
+            {
+                int cmp = compare(values[i], o.values[i]);
+                if (cmp != 0)
+                    return cmp;
+            }
+
+            return 0;
+        }
+
+        @SuppressWarnings("unchecked")
+        private <T extends Comparable<T>> int compare(Object c1, Object c2)
+        {
+            return ((T) c1).compareTo((T) c2);
+        }
+    }
+
+    /**
+     * A regular column value.
+     */
+    public static final class ColumnValue
+    {
+        /**
+         * The column metadata
+         */
+        private final ColumnMetadata metadata;
+
+        /**
+         * The column value
+         */
+        private final Object value;
+
+        /**
+         * Returns the column value corresponding to the specified cell.
+         *
+         * @param cell the column cell metadata
+         * @return the column value corresponding to the specified cell
+         */
+        public static ColumnValue from(Cell<?> cell)
+        {
+            ColumnMetadata metadata = cell.column();
+            return new ColumnValue(metadata, metadata.type.compose(cell.buffer()));
+        }
+
+        private ColumnValue(ColumnMetadata metadata, Object value)
+        {
+            this.metadata = metadata;
+            this.value = value;
+        }
+
+        /**
+         * Returns the column name.
+         *
+         * @return the column name
+         */
+        public String name()
+        {
+            return metadata.name.toCQLString();
+        }
+
+        /**
+         * Returns the column value.
+         *
+         * @return the column value
+         */
+        @SuppressWarnings("unchecked")
+        public <V> V value()
+        {
+            return (V) value;
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("%s : %s", name(), value());
+        }
     }
 }

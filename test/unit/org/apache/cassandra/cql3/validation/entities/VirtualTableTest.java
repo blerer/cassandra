@@ -18,14 +18,21 @@
 package org.apache.cassandra.cql3.validation.entities;
 
 import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
-import java.util.SortedMap;
-import java.util.TreeMap;
+import java.util.Optional;
+import java.util.NavigableMap;
+
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Maps;
 import com.google.common.collect.Range;
+
+import org.apache.commons.lang3.tuple.Pair;
+
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -45,7 +52,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.StorageServiceMBean;
 import org.apache.cassandra.triggers.ITrigger;
-import org.apache.cassandra.utils.Pair;
+
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
@@ -56,11 +63,12 @@ public class VirtualTableTest extends CQLTester
     private static final String VT1_NAME = "vt1";
     private static final String VT2_NAME = "vt2";
     private static final String VT3_NAME = "vt3";
+    private static final String VT4_NAME = "vt4";
 
     private static class MutableVirtualTable extends AbstractMutableVirtualTable
     {
         // <pk1, pk2> -> c1 -> c2 -> <v1, v2>
-        private final Map<Pair<String, String>, SortedMap<String, SortedMap<String, Pair<Integer, Long>>>> backingMap = new ConcurrentHashMap<>();
+        private final Map<Pair<String, String>, NavigableMap<String, NavigableMap<String, Pair<Number, Number>>>> backingMap = new ConcurrentHashMap<>();
 
         MutableVirtualTable(String keyspaceName, String tableName)
         {
@@ -81,104 +89,108 @@ public class VirtualTableTest extends CQLTester
             SimpleDataSet data = new SimpleDataSet(metadata());
             backingMap.forEach((pkPair, c1Map) ->
                     c1Map.forEach((c1, c2Map) ->
-                    c2Map.forEach((c2, valuePair) -> data.row(pkPair.left, pkPair.right, c1, c2)
-                            .column("v1", valuePair.left)
-                            .column("v2", valuePair.right))));
+                    c2Map.forEach((c2, valuePair) -> data.row(pkPair.getLeft(), pkPair.getRight(), c1, c2)
+                                                         .column("v1", valuePair.getLeft())
+                                                         .column("v2", valuePair.getRight()))));
             return data;
         }
 
         @Override
-        protected void applyPartitionDeletion(Object[] partitionKeyColumnValues)
+        protected void applyPartitionDeletion(ColumnValues partitionKeyColumns)
         {
-            String pk1 = (String) partitionKeyColumnValues[0];
-            String pk2 = (String) partitionKeyColumnValues[1];
-            backingMap.remove(Pair.create(pk1, pk2));
+            backingMap.remove(toPartitionKey(partitionKeyColumns));
         }
 
         @Override
-        protected void applyRangeTombstone(Object[] partitionKeyColumnValues,
-                                           Comparable<?>[] clusteringColumnValuesPrefix,
-                                           Range<Comparable<?>> range)
+        protected void applyRangeTombstone(ColumnValues partitionKeyColumns, Range<ColumnValues> range)
         {
-            Pair<String, String> pkPair = Pair.create((String) partitionKeyColumnValues[0], (String) partitionKeyColumnValues[1]);
+            Optional<NavigableMap<String, NavigableMap<String, Pair<Number, Number>>>> mayBePartition = getPartition(partitionKeyColumns);
 
-            if (clusteringColumnValuesPrefix.length > 0)
+            if (!mayBePartition.isPresent())
+                return;
+
+            NavigableMap<String, NavigableMap<String, Pair<Number, Number>>> selection = mayBePartition.get();
+
+            for (String c1 : ImmutableList.copyOf(selection.keySet()))
             {
-                SortedMap<String, Pair<Integer, Long>> clusteringColumnsMap = backingMap
-                        .computeIfAbsent(pkPair, ignored -> new TreeMap<>())
-                        .computeIfAbsent((String) clusteringColumnValuesPrefix[0], ignored -> new TreeMap<>());
+                NavigableMap<String, Pair<Number, Number>> rows = selection.get(c1);
 
-                Maps.filterKeys(clusteringColumnsMap, range::contains).clear();
-            }
-            else
-            {
-                SortedMap<String, SortedMap<String, Pair<Integer, Long>>> clusteringColumnsMap = backingMap
-                        .computeIfAbsent(pkPair, ignored -> new TreeMap<>());
+                for (String c2 : ImmutableList.copyOf(selection.get(c1).keySet()))
+                {
+                    if (range.contains(new ColumnValues(metadata().clusteringColumns(), c1, c2)))
+                        rows.remove(c2);
+                }
 
-                Maps.filterKeys(clusteringColumnsMap, range::contains).clear();
-            }
-        }
-
-        @Override
-        protected void applyRowWithoutRegularColumnsInsertion(Object[] partitionKeyColumnValues, Comparable<?>[] clusteringColumnValues) {
-            Pair<String, String> pkPair = Pair.create((String) partitionKeyColumnValues[0], (String) partitionKeyColumnValues[1]);
-            String c1 = (String) clusteringColumnValues[0];
-            String c2 = (String) clusteringColumnValues[1];
-
-            backingMap.computeIfAbsent(pkPair, ignored -> new TreeMap<>())
-                    .computeIfAbsent(c1, ignored -> new TreeMap<>())
-                    .put(c2, Pair.create(null, null));
-        }
-
-        @Override
-        protected void applyRowDeletion(Object[] partitionKeyColumnValues, Comparable<?>[] clusteringColumnValues)
-        {
-            Pair<String, String> pkPair = Pair.create((String) partitionKeyColumnValues[0], (String) partitionKeyColumnValues[1]);
-            String c1 = (String) clusteringColumnValues[0];
-            String c2 = (String) clusteringColumnValues[1];
-
-            backingMap.computeIfAbsent(pkPair, ignored -> new TreeMap<>())
-                    .computeIfAbsent(c1, ignored -> new TreeMap<>())
-                    .remove(c2);
-        }
-
-        @Override
-        protected void applyColumnDeletion(Object[] partitionKeyColumnValues, Comparable<?>[] clusteringColumnValues, String columnName)
-        {
-            Pair<String, String> pkPair = Pair.create((String) partitionKeyColumnValues[0], (String) partitionKeyColumnValues[1]);
-            String c1 = (String) clusteringColumnValues[0];
-            String c2 = (String) clusteringColumnValues[1];
-            Pair<Integer, Long> p = backingMap.computeIfAbsent(pkPair, ignored -> new TreeMap<>())
-                    .computeIfAbsent(c1, ignored -> new TreeMap<>())
-                    .get(c2);
-
-            if (p != null)
-            {
-                @SuppressWarnings("SuspiciousNameCombination")
-                Pair<Integer, Long> valuePair = columnName.equals("v1")
-                        ? Pair.create(null, p.right) : Pair.create(p.left, null);
-                backingMap.get(pkPair).get(c1).put(c2, valuePair);
+                if (rows.isEmpty())
+                    selection.remove(c1);
             }
         }
 
         @Override
-        protected void applyColumnUpdate(Object[] partitionKeyColumnValues, Comparable<?>[] clusteringColumnValues,
-                                         String columnName, Object columnValue)
+        protected void applyRowDeletion(ColumnValues partitionKeyColumns, ColumnValues clusteringColumns)
         {
-            Pair<String, String> pkPair = Pair.create((String) partitionKeyColumnValues[0], (String) partitionKeyColumnValues[1]);
-            String c1 = (String) clusteringColumnValues[0];
-            String c2 = (String) clusteringColumnValues[1];
-            backingMap.computeIfAbsent(pkPair, ignored -> new TreeMap<>())
-                    .computeIfAbsent(c1, ignored -> new TreeMap<>())
-                    .compute(c2, (ignored, p) -> "v1".equals(columnName)
-                            ? Pair.create((Integer) columnValue, p != null ? p.right : null)
-                            : Pair.create(p != null ? p.left : null, (Long) columnValue));
+            getRows(partitionKeyColumns, clusteringColumns.value(0)).ifPresent(rows -> rows.remove(clusteringColumns.value(1)));
+        }
+
+        @Override
+        protected void applyColumnDeletion(ColumnValues partitionKeyColumns, ColumnValues clusteringColumns, String columnName)
+        {
+            getRows(partitionKeyColumns, clusteringColumns.value(0)).ifPresent(rows -> rows.computeIfPresent(clusteringColumns.value(1),
+                                                                                                             (c, p) -> updateColumn(p, columnName, null)));
+
+        }
+
+        @Override
+        protected void applyColumnUpdate(ColumnValues partitionKeyColumns,
+                                         ColumnValues clusteringColumns,
+                                         Optional<ColumnValue> mayBeColumnValue)
+        {
+            Pair<String, String> pkPair = toPartitionKey(partitionKeyColumns);
+            backingMap.computeIfAbsent(pkPair, ignored -> new ConcurrentSkipListMap<>())
+                      .computeIfAbsent(clusteringColumns.value(0), ignored -> new ConcurrentSkipListMap<>())
+                      .compute(clusteringColumns.value(1), (ignored, p) -> updateColumn(p, mayBeColumnValue));
         }
 
         @Override
         public void truncate()
         {
             backingMap.clear();
+        }
+
+        private Optional<NavigableMap<String, Pair<Number, Number>>> getRows(ColumnValues partitionKeyColumns, Comparable<?> firstClusteringColumn)
+        {
+            return getPartition(partitionKeyColumns).map(p -> p.get(firstClusteringColumn));
+        }
+
+        private Optional<NavigableMap<String, NavigableMap<String, Pair<Number, Number>>>> getPartition(ColumnValues partitionKeyColumns)
+        {
+            Pair<String, String> pk = toPartitionKey(partitionKeyColumns);
+            return Optional.ofNullable(backingMap.get(pk));
+        }
+
+        private Pair<String, String> toPartitionKey(ColumnValues partitionKey)
+        {
+            return Pair.of(partitionKey.value(0), partitionKey.value(1));
+        }
+
+        private static Pair<Number, Number> updateColumn(Pair<Number, Number> row, String columnName, Number newValue)
+        {
+            return "v1".equals(columnName) ? Pair.of(newValue, row.getRight())
+                                           : Pair.of(row.getLeft(), newValue);
+        }
+
+        private static Pair<Number, Number> updateColumn(Pair<Number, Number> row,
+                                                          Optional<ColumnValue> mayBeColumnValue)
+        {
+            Pair<Number, Number> r = row != null ? row : Pair.of(null, null);
+
+            if (mayBeColumnValue.isPresent())
+            {
+                ColumnValue newValue = mayBeColumnValue.get();
+                return updateColumn(r, newValue.name(), newValue.value());
+            }
+
+            return r;
         }
     }
 
@@ -234,7 +246,92 @@ public class VirtualTableTest extends CQLTester
             }
         };
 
-        VirtualKeyspaceRegistry.instance.register(new VirtualKeyspace(KS_NAME, ImmutableList.of(vt1, vt2, vt3)));
+        TableMetadata vt4Metadata = TableMetadata.builder(KS_NAME, VT4_NAME)
+                .kind(TableMetadata.Kind.VIRTUAL)
+                .addPartitionKeyColumn("pk", UTF8Type.instance)
+                .addRegularColumn("v", LongType.instance)
+                .build();
+
+        VirtualTable vt4 = new AbstractMutableVirtualTable(vt4Metadata)
+        {
+            private final AtomicReference<Map<String, Long>> table = new AtomicReference<Map<String,Long>>(Collections.emptyMap());
+
+            @Override
+            public DataSet data()
+            {
+                SimpleDataSet data = new SimpleDataSet(metadata());
+                table.get().forEach((pk, v) -> data.row(pk).column("v", v));
+                return data;
+            }
+
+            @Override
+            protected void applyPartitionDeletion(ColumnValues partitionKey)
+            {
+                Map<String, Long> oldMap;
+                Map<String, Long> newMap;
+                do
+                {
+                    oldMap = table.get();
+                    newMap = new HashMap<>(oldMap);
+                    newMap.remove(partitionKey.value(0));
+                }
+                while(!table.compareAndSet(oldMap, newMap));
+            }
+
+            @Override
+            protected void applyColumnDeletion(ColumnValues partitionKey,
+                                               ColumnValues clusteringColumns,
+                                               String columnName)
+            {
+                Map<String, Long> oldMap;
+                Map<String, Long> newMap;
+                do
+                {
+                    oldMap = table.get();
+
+                    if (!oldMap.containsKey(partitionKey.value(0)))
+                        break;
+
+                    newMap = new HashMap<>(oldMap);
+                    newMap.put(partitionKey.value(0), null);
+                }
+                while(!table.compareAndSet(oldMap, newMap));
+            }
+
+            @Override
+            protected void applyColumnUpdate(ColumnValues partitionKey,
+                                             ColumnValues clusteringColumns,
+                                             Optional<ColumnValue> columnValue)
+            {
+                Map<String, Long> oldMap;
+                Map<String, Long> newMap;
+                do
+                {
+                    oldMap = table.get();
+                    if (oldMap.containsKey(partitionKey.value(0)) && !columnValue.isPresent())
+                        break;
+                    newMap = new HashMap<>(oldMap);
+                    newMap.put(partitionKey.value(0), columnValue.isPresent() ? columnValue.get().value() : null);
+                }
+                while(!table.compareAndSet(oldMap, newMap));
+            }
+
+            @Override
+            public void truncate()
+            {
+                Map<String, Long> oldMap;
+                do
+                {
+                    oldMap = table.get();
+                    if (oldMap.isEmpty())
+                        break;
+                }
+                while(!table.compareAndSet(oldMap, Collections.emptyMap()));
+            }
+
+        };
+
+        VirtualKeyspaceRegistry.instance.register(new VirtualKeyspace(KS_NAME, ImmutableList.of(vt1, vt2, vt3, vt4)));
 
         CQLTester.setUpClass();
     }
@@ -342,7 +439,7 @@ public class VirtualTableTest extends CQLTester
     }
 
     @Test
-    public void testDMLOperationsOnMutableTable() throws Throwable
+    public void testDMLOperationsOnMutableCompositeTable() throws Throwable
     {
         // check for a clean state
         execute("TRUNCATE test_virtual_ks.vt2");
@@ -460,6 +557,213 @@ public class VirtualTableTest extends CQLTester
         // truncate
         execute("TRUNCATE test_virtual_ks.vt2");
         assertEmpty(execute("SELECT * FROM test_virtual_ks.vt2"));
+    }
+
+    @Test
+    public void testRangeDeletionWithMulticolumnRestrictionsOnMutableTable() throws Throwable
+    {
+        // check for a clean state
+        execute("TRUNCATE test_virtual_ks.vt2");
+        assertEmpty(execute("SELECT * FROM test_virtual_ks.vt2"));
+
+        // fill the table, test UNLOGGED batch
+        execute("BEGIN UNLOGGED BATCH " +
+                "UPDATE test_virtual_ks.vt2 SET v1 =  1, v2 =  1 WHERE pk1 = 'pk1_1' AND pk2 = 'pk2_1' AND c1 = 'c1_1' AND c2 = 'c2_1';" +
+                "UPDATE test_virtual_ks.vt2 SET v1 =  2, v2 =  2 WHERE pk1 = 'pk1_1' AND pk2 = 'pk2_1' AND c1 = 'c1_1' AND c2 = 'c2_2';" +
+                "UPDATE test_virtual_ks.vt2 SET v1 =  3, v2 =  3 WHERE pk1 = 'pk1_2' AND pk2 = 'pk2_1' AND c1 = 'c1_1' AND c2 = 'c2_1';" +
+                "UPDATE test_virtual_ks.vt2 SET v1 =  4, v2 =  4 WHERE pk1 = 'pk1_2' AND pk2 = 'pk2_1' AND c1 = 'c1_1' AND c2 = 'c2_3';" +
+                "UPDATE test_virtual_ks.vt2 SET v1 =  5, v2 =  5 WHERE pk1 = 'pk1_2' AND pk2 = 'pk2_1' AND c1 = 'c1_1' AND c2 = 'c2_5';" +
+                "UPDATE test_virtual_ks.vt2 SET v1 =  6, v2 =  6 WHERE pk1 = 'pk1_2' AND pk2 = 'pk2_1' AND c1 = 'c1_1' AND c2 = 'c2_6';" +
+                "UPDATE test_virtual_ks.vt2 SET v1 =  7, v2 =  7 WHERE pk1 = 'pk1_2' AND pk2 = 'pk2_2' AND c1 = 'c1_1' AND c2 = 'c2_1';" +
+                "UPDATE test_virtual_ks.vt2 SET v1 =  8, v2 =  8 WHERE pk1 = 'pk1_2' AND pk2 = 'pk2_2' AND c1 = 'c1_2' AND c2 = 'c2_1';" +
+                "UPDATE test_virtual_ks.vt2 SET v1 =  9, v2 =  9 WHERE pk1 = 'pk1_1' AND pk2 = 'pk2_3' AND c1 = 'c1_2' AND c2 = 'c2_1';" +
+                "UPDATE test_virtual_ks.vt2 SET v1 = 10, v2 = 10 WHERE pk1 = 'pk1_1' AND pk2 = 'pk2_3' AND c1 = 'c1_2' AND c2 = 'c2_2';" +
+                "UPDATE test_virtual_ks.vt2 SET v1 = 11, v2 = 11 WHERE pk1 = 'pk1_1' AND pk2 = 'pk2_3' AND c1 = 'c1_2' AND c2 = 'c2_3';" +
+                "UPDATE test_virtual_ks.vt2 SET v1 = 12, v2 = 12 WHERE pk1 = 'pk1_1' AND pk2 = 'pk2_3' AND c1 = 'c1_2' AND c2 = 'c2_4';" +
+                "UPDATE test_virtual_ks.vt2 SET v1 = 13, v2 = 13 WHERE pk1 = 'pk1_1' AND pk2 = 'pk2_3' AND c1 = 'c1_2' AND c2 = 'c2_5';" +
+                "UPDATE test_virtual_ks.vt2 SET v1 = 14, v2 = 14 WHERE pk1 = 'pk1_1' AND pk2 = 'pk2_3' AND c1 = 'c1_3' AND c2 = 'c2_1';" +
+                "APPLY BATCH");
+        assertRowsIgnoringOrder(execute("SELECT * FROM test_virtual_ks.vt2"),
+                row("pk1_1", "pk2_1", "c1_1", "c2_1", 1, 1L),
+                row("pk1_1", "pk2_1", "c1_1", "c2_2", 2, 2L),
+                row("pk1_2", "pk2_1", "c1_1", "c2_1", 3, 3L),
+                row("pk1_2", "pk2_1", "c1_1", "c2_3", 4, 4L),
+                row("pk1_2", "pk2_1", "c1_1", "c2_5", 5, 5L),
+                row("pk1_2", "pk2_1", "c1_1", "c2_6", 6, 6L),
+                row("pk1_2", "pk2_2", "c1_1", "c2_1", 7, 7L),
+                row("pk1_2", "pk2_2", "c1_2", "c2_1", 8, 8L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_1", 9, 9L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_2", 10, 10L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_3", 11, 11L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_4", 12, 12L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_5", 13, 13L),
+                row("pk1_1", "pk2_3", "c1_3", "c2_1", 14, 14L));
+
+        // Test deletion with multiple columns equality
+        execute("DELETE FROM test_virtual_ks.vt2 WHERE pk1 = 'pk1_2' AND pk2 = 'pk2_1' AND (c1, c2) = ('c1_1', 'c2_5')");
+        assertRowsIgnoringOrder(execute("SELECT * FROM test_virtual_ks.vt2"),
+                row("pk1_1", "pk2_1", "c1_1", "c2_1", 1, 1L),
+                row("pk1_1", "pk2_1", "c1_1", "c2_2", 2, 2L),
+                row("pk1_2", "pk2_1", "c1_1", "c2_1", 3, 3L),
+                row("pk1_2", "pk2_1", "c1_1", "c2_3", 4, 4L),
+                row("pk1_2", "pk2_1", "c1_1", "c2_6", 6, 6L),
+                row("pk1_2", "pk2_2", "c1_1", "c2_1", 7, 7L),
+                row("pk1_2", "pk2_2", "c1_2", "c2_1", 8, 8L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_1", 9, 9L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_2", 10, 10L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_3", 11, 11L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_4", 12, 12L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_5", 13, 13L),
+                row("pk1_1", "pk2_3", "c1_3", "c2_1", 14, 14L));
+
+        // Test deletion with multiple columns with slice on both side of different length
+        execute("DELETE FROM test_virtual_ks.vt2 WHERE pk1 = 'pk1_2' AND pk2 = 'pk2_1' AND c1 >= 'c1_1' AND (c1, c2) <= ('c1_1', 'c2_5')");
+        assertRowsIgnoringOrder(execute("SELECT * FROM test_virtual_ks.vt2"),
+                row("pk1_1", "pk2_1", "c1_1", "c2_1", 1, 1L),
+                row("pk1_1", "pk2_1", "c1_1", "c2_2", 2, 2L),
+                row("pk1_2", "pk2_1", "c1_1", "c2_6", 6, 6L),
+                row("pk1_2", "pk2_2", "c1_1", "c2_1", 7, 7L),
+                row("pk1_2", "pk2_2", "c1_2", "c2_1", 8, 8L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_1", 9, 9L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_2", 10, 10L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_3", 11, 11L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_4", 12, 12L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_5", 13, 13L),
+                row("pk1_1", "pk2_3", "c1_3", "c2_1", 14, 14L));
+
+        execute("DELETE FROM test_virtual_ks.vt2 WHERE pk1 = 'pk1_1' AND pk2 = 'pk2_3' AND (c1, c2) > ('c1_2', 'c2_3') AND (c1) < ('c1_3')");
+        assertRowsIgnoringOrder(execute("SELECT * FROM test_virtual_ks.vt2"),
+                row("pk1_1", "pk2_1", "c1_1", "c2_1", 1, 1L),
+                row("pk1_1", "pk2_1", "c1_1", "c2_2", 2, 2L),
+                row("pk1_2", "pk2_1", "c1_1", "c2_6", 6, 6L),
+                row("pk1_2", "pk2_2", "c1_1", "c2_1", 7, 7L),
+                row("pk1_2", "pk2_2", "c1_2", "c2_1", 8, 8L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_1", 9, 9L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_2", 10, 10L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_3", 11, 11L),
+                row("pk1_1", "pk2_3", "c1_3", "c2_1", 14, 14L));
+
+        // Test deletion with multiple columns with slice on both side of different length
+        execute("DELETE FROM test_virtual_ks.vt2 WHERE pk1 = 'pk1_2' AND pk2 = 'pk2_1' AND c1 >= 'c1_1' AND (c1, c2) <= ('c1_1', 'c2_5')");
+        assertRowsIgnoringOrder(execute("SELECT * FROM test_virtual_ks.vt2"),
+                row("pk1_1", "pk2_1", "c1_1", "c2_1", 1, 1L),
+                row("pk1_1", "pk2_1", "c1_1", "c2_2", 2, 2L),
+                row("pk1_2", "pk2_1", "c1_1", "c2_6", 6, 6L),
+                row("pk1_2", "pk2_2", "c1_1", "c2_1", 7, 7L),
+                row("pk1_2", "pk2_2", "c1_2", "c2_1", 8, 8L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_1", 9, 9L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_2", 10, 10L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_3", 11, 11L),
+                row("pk1_1", "pk2_3", "c1_3", "c2_1", 14, 14L));
+
+        // Test deletion with multiple columns with only top slice
+        execute("DELETE FROM test_virtual_ks.vt2 WHERE pk1 = 'pk1_1' AND pk2 = 'pk2_3' AND (c1, c2) < ('c1_2', 'c2_2')");
+        assertRowsIgnoringOrder(execute("SELECT * FROM test_virtual_ks.vt2"),
+                row("pk1_1", "pk2_1", "c1_1", "c2_1", 1, 1L),
+                row("pk1_1", "pk2_1", "c1_1", "c2_2", 2, 2L),
+                row("pk1_2", "pk2_1", "c1_1", "c2_6", 6, 6L),
+                row("pk1_2", "pk2_2", "c1_1", "c2_1", 7, 7L),
+                row("pk1_2", "pk2_2", "c1_2", "c2_1", 8, 8L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_2", 10, 10L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_3", 11, 11L),
+                row("pk1_1", "pk2_3", "c1_3", "c2_1", 14, 14L));
+
+        // Test deletion with multiple columns with only bottom slice
+        execute("DELETE FROM test_virtual_ks.vt2 WHERE pk1 = 'pk1_1' AND pk2 = 'pk2_1' AND (c1, c2) > ('c1_1', 'c2_1')");
+        assertRowsIgnoringOrder(execute("SELECT * FROM test_virtual_ks.vt2"),
+                row("pk1_1", "pk2_1", "c1_1", "c2_1", 1, 1L),
+                row("pk1_2", "pk2_1", "c1_1", "c2_6", 6, 6L),
+                row("pk1_2", "pk2_2", "c1_1", "c2_1", 7, 7L),
+                row("pk1_2", "pk2_2", "c1_2", "c2_1", 8, 8L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_2", 10, 10L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_3", 11, 11L),
+                row("pk1_1", "pk2_3", "c1_3", "c2_1", 14, 14L));
+
+        // Test deletion with multiple columns IN
+        execute("DELETE FROM test_virtual_ks.vt2 WHERE pk1 = 'pk1_1' AND pk2 = 'pk2_3' AND (c1, c2) IN (('c1_2', 'c2_2'), ('c1_3', 'c2_1'), ('c1_4', 'c2_1'))");
+        assertRowsIgnoringOrder(execute("SELECT * FROM test_virtual_ks.vt2"),
+                row("pk1_1", "pk2_1", "c1_1", "c2_1", 1, 1L),
+                row("pk1_2", "pk2_1", "c1_1", "c2_6", 6, 6L),
+                row("pk1_2", "pk2_2", "c1_1", "c2_1", 7, 7L),
+                row("pk1_2", "pk2_2", "c1_2", "c2_1", 8, 8L),
+                row("pk1_1", "pk2_3", "c1_2", "c2_3", 11, 11L));
+
+        // truncate
+        execute("TRUNCATE test_virtual_ks.vt2");
+        assertEmpty(execute("SELECT * FROM test_virtual_ks.vt2"));
+    }
+
+    @Test
+    public void testDMLOperationsOnMutableNonCompositeTable() throws Throwable
+    {
+        // check for a clean state
+        execute("TRUNCATE test_virtual_ks.vt4");
+        assertEmpty(execute("SELECT * FROM test_virtual_ks.vt4"));
+
+        // fill the table, test UNLOGGED batch
+        execute("BEGIN UNLOGGED BATCH " +
+                "INSERT INTO test_virtual_ks.vt4 (pk, v) VALUES ('pk1', 1);" +
+                "INSERT INTO test_virtual_ks.vt4 (pk, v) VALUES ('pk2', 2);" +
+                "INSERT INTO test_virtual_ks.vt4 (pk, v) VALUES ('pk3', 3);" +
+                "INSERT INTO test_virtual_ks.vt4 (pk, v) VALUES ('pk4', 4);" +
+                "APPLY BATCH");
+        assertRowsIgnoringOrder(execute("SELECT * FROM test_virtual_ks.vt4"),
+                row("pk1", 1L),
+                row("pk2", 2L),
+                row("pk3", 3L),
+                row("pk4", 4L));
+
+         execute("UPDATE test_virtual_ks.vt4 SET v = 3 WHERE pk = 'pk1'");
+         assertRowsIgnoringOrder(execute("SELECT * FROM test_virtual_ks.vt4"),
+                 row("pk1", 3L),
+                 row("pk2", 2L),
+                 row("pk3", 3L),
+                 row("pk4", 4L));
+
+        // update a single columns with INSERT
+         execute("INSERT INTO test_virtual_ks.vt4 (pk, v) VALUES ('pk1', 1);");
+         assertRowsIgnoringOrder(execute("SELECT * FROM test_virtual_ks.vt4"),
+                 row("pk1", 1L),
+                 row("pk2", 2L),
+                 row("pk3", 3L),
+                 row("pk4", 4L));
+
+         // update no column via INSERT
+         execute("INSERT INTO test_virtual_ks.vt4 (pk) VALUES ('pk1');");
+         assertRowsIgnoringOrder(execute("SELECT * FROM test_virtual_ks.vt4"),
+                 row("pk1", 1L),
+                 row("pk2", 2L),
+                 row("pk3", 3L),
+                 row("pk4", 4L));
+
+         // insert new primary key only
+         execute("INSERT INTO test_virtual_ks.vt4 (pk) VALUES ('pk5');");
+         assertRowsIgnoringOrder(execute("SELECT * FROM test_virtual_ks.vt4"),
+                 row("pk1", 1L),
+                 row("pk2", 2L),
+                 row("pk3", 3L),
+                 row("pk4", 4L),
+                 row("pk5", null));
+
+        // delete a single partition
+        execute("DELETE FROM test_virtual_ks.vt4 WHERE pk = 'pk2'");
+        assertRowsIgnoringOrder(execute("SELECT * FROM test_virtual_ks.vt4"),
+                row("pk1", 1L),
+                row("pk3", 3L),
+                row("pk4", 4L),
+                row("pk5", null));
+
+        // delete a single column
+        execute("DELETE v FROM test_virtual_ks.vt4 WHERE pk = 'pk4'");
+        assertRowsIgnoringOrder(execute("SELECT * FROM test_virtual_ks.vt4"),
+                row("pk1", 1L),
+                row("pk3", 3L),
+                row("pk4", null),
+                row("pk5", null));
+
+        // truncate
+        execute("TRUNCATE test_virtual_ks.vt4");
+        assertEmpty(execute("SELECT * FROM test_virtual_ks.vt4"));
     }
 
     @Test
