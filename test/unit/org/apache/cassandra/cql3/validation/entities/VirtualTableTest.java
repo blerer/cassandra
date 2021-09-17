@@ -28,6 +28,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicReference;
 
+import javax.annotation.Nonnull;
+
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Range;
 
@@ -65,6 +67,10 @@ public class VirtualTableTest extends CQLTester
     private static final String VT3_NAME = "vt3";
     private static final String VT4_NAME = "vt4";
 
+    // As long as we execute test queries using execute (and not executeNet) the virtual tables implementation
+    // do not need to be thread-safe. We choose to do it to avoid issues if the test framework was changed or somebody
+    // decided to use the class with executeNet. It also provide a better example in case somebody is looking
+    // at the test for learning how to create mutable virtual tables
     private static class MutableVirtualTable extends AbstractMutableVirtualTable
     {
         // <pk1, pk2> -> c1 -> c2 -> <v1, v2>
@@ -137,7 +143,6 @@ public class VirtualTableTest extends CQLTester
         {
             getRows(partitionKeyColumns, clusteringColumns.value(0)).ifPresent(rows -> rows.computeIfPresent(clusteringColumns.value(1),
                                                                                                              (c, p) -> updateColumn(p, columnName, null)));
-
         }
 
         @Override
@@ -173,14 +178,16 @@ public class VirtualTableTest extends CQLTester
             return Pair.of(partitionKey.value(0), partitionKey.value(1));
         }
 
-        private static Pair<Number, Number> updateColumn(Pair<Number, Number> row, String columnName, Number newValue)
+        private static Pair<Number, Number> updateColumn(@Nonnull Pair<Number, Number> row,
+                                                         String columnName,
+                                                         Number newValue)
         {
             return "v1".equals(columnName) ? Pair.of(newValue, row.getRight())
                                            : Pair.of(row.getLeft(), newValue);
         }
 
         private static Pair<Number, Number> updateColumn(Pair<Number, Number> row,
-                                                          Optional<ColumnValue> mayBeColumnValue)
+                                                         Optional<ColumnValue> mayBeColumnValue)
         {
             Pair<Number, Number> r = row != null ? row : Pair.of(null, null);
 
@@ -252,9 +259,14 @@ public class VirtualTableTest extends CQLTester
                 .addRegularColumn("v", LongType.instance)
                 .build();
 
+        // As long as we execute test queries using execute (and not executeNet) the virtual tables implementation
+        // do not need to be thread-safe. We choose to do it to avoid issues if the test framework was changed or somebody
+        // decided to use the class with executeNet. It also provide a better example in case somebody is looking
+        // at the test for learning how to create mutable virtual tables
         VirtualTable vt4 = new AbstractMutableVirtualTable(vt4Metadata)
         {
-            private final AtomicReference<Map<String, Long>> table = new AtomicReference<Map<String,Long>>(Collections.emptyMap());
+            // CHM cannot be used here as they do not accept null values
+            private final AtomicReference<Map<String, Long>> table = new AtomicReference<Map<String, Long>>(Collections.emptyMap());
 
             @Override
             public DataSet data()

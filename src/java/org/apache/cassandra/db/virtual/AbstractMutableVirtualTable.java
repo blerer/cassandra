@@ -18,6 +18,7 @@
 package org.apache.cassandra.db.virtual;
 
 import java.nio.ByteBuffer;
+import java.util.List;
 import java.util.Optional;
 
 import com.google.common.base.Preconditions;
@@ -44,6 +45,8 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.invalidReq
 /**
  * An abstract virtual table implementation that builds the resultset on demand and allows fine-grained source
  * modification via INSERT/UPDATE, DELETE and TRUNCATE operations.
+ * 
+ * Virtual table implementation need to be thread-safe has they can be called from different threads.
  */
 public abstract class AbstractMutableVirtualTable extends AbstractVirtualTable
 {
@@ -95,7 +98,7 @@ public abstract class AbstractMutableVirtualTable extends AbstractVirtualTable
             if (update.deletionInfo().hasRanges())
                 update.deletionInfo()
                         .rangeIterator(false)
-                        .forEachRemaining(rt -> convertAndApplyRangeTombstone(partitionKey, rt.deletedSlice()));
+                        .forEachRemaining(rt -> applyRangeTombstone(partitionKey, toRange(rt.deletedSlice())));
 
             if (!update.deletionInfo().getPartitionDeletion().isLive())
                 applyPartitionDeletion(partitionKey);
@@ -105,11 +108,6 @@ public abstract class AbstractMutableVirtualTable extends AbstractVirtualTable
     protected void applyPartitionDeletion(ColumnValues partitionKey)
     {
         throw invalidRequest("Partition deletion is not supported by table %s", metadata);
-    }
-
-    private void convertAndApplyRangeTombstone(ColumnValues partitionKey, Slice slice)
-    {
-        applyRangeTombstone(partitionKey, toRange(slice));
     }
 
     private Range<ColumnValues> toRange(Slice slice)
@@ -142,20 +140,7 @@ public abstract class AbstractMutableVirtualTable extends AbstractVirtualTable
         return bound.isInclusive() ? BoundType.CLOSED : BoundType.OPEN;
     }
 
-    /**
-     * This method accepts parsed parts of a corresponding range tombstone. There is a tricky logic for
-     * {@code clusteringColumnValuesPrefix} calculation. It consists of clustering columns that have equality condition.
-     * It is worth mentioning that it is only possible to have clusering columns from first levels. For example, if
-     * there are three clustering columns specified in the range combstone: {@code c1='c1_1' AND c2='c2_1' AND c3>'c3_1'},
-     * then {@code clusteringColumnValuesPrefix} will have ["c1_1", "c2_1"] values. In case of a single clustering column
-     * the prefix will be empty.
-     *
-     * @param partitionKeyColumnValues is a non-empty array of partition key columns
-     * @param clusteringColumnValuesPrefix is an array (it may be empty!) of clustering columns with equality condition
-     * @param range is a range of values for the last clustering column
-     */
-    protected void applyRangeTombstone(ColumnValues partitionKey,
-                                       Range<ColumnValues> range)
+    protected void applyRangeTombstone(ColumnValues partitionKey, Range<ColumnValues> range)
     {
         throw invalidRequest("Range deletion is not supported by table %s", metadata);
     }
@@ -214,7 +199,7 @@ public abstract class AbstractMutableVirtualTable extends AbstractVirtualTable
         {
             if (metadata.partitionKeyType instanceof CompositeType)
             {
-                ByteBuffer[] buffers= ((CompositeType) metadata.partitionKeyType).split(partitionKey.getKey());
+                ByteBuffer[] buffers = ((CompositeType) metadata.partitionKeyType).split(partitionKey.getKey());
                 return ColumnValues.from(metadata.partitionKeyColumns(), buffers);
             }
 
@@ -247,9 +232,9 @@ public abstract class AbstractMutableVirtualTable extends AbstractVirtualTable
          * @param metadata the partition or clustering columns metadata
          * @param values the partition or clustering column values
          */
-        public ColumnValues(ImmutableList<ColumnMetadata> metadata, Object... values)
+        public ColumnValues(List<ColumnMetadata> metadata, Object... values)
         {
-            this.metadata = metadata;
+            this.metadata = ImmutableList.copyOf(metadata);
             this.values = values;
         }
 
