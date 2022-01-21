@@ -17,7 +17,11 @@
  */
 package org.apache.cassandra.cql3;
 
+import java.util.Set;
+
 import org.junit.Test;
+
+import com.google.monitoring.runtime.instrumentation.common.collect.ImmutableSet;
 
 import org.antlr.runtime.ANTLRStringStream;
 import org.antlr.runtime.BaseRecognizer;
@@ -79,10 +83,11 @@ public class CqlParserTest
     @Test
     public void testDuplicateProperties() throws Exception
     {
-        parseAndCountErrors("properties = { 'foo' : 'value1', 'bar': 'value2' };", 0, (p) -> p.properties(new PropertyDefinitions()));
-        parseAndCountErrors("properties = { 'foo' : 'value1', 'foo': 'value2' };", 1, (p) -> p.properties(new PropertyDefinitions()));
-        parseAndCountErrors("foo = 'value1' AND bar = 'value2' };", 0, (p) -> p.properties(new PropertyDefinitions()));
-        parseAndCountErrors("foo = 'value1' AND foo = 'value2' };", 1, (p) -> p.properties(new PropertyDefinitions()));
+        Set<String> validProperties = ImmutableSet.of("foo", "bar");
+        parseAndCountErrors("properties = { 'foo' : 'value1', 'bar': 'value2' };", 0, (p) -> p.properties(new PropertyDefinitions(validProperties)));
+        parseAndCountErrors("properties = { 'foo' : 'value1', 'foo': 'value2' };", 1, (p) -> p.properties(new PropertyDefinitions(validProperties)));
+        parseAndCountErrors("foo = 'value1' AND bar = 'value2' };", 0, (p) -> p.properties(new PropertyDefinitions(validProperties)));
+        parseAndCountErrors("foo = 'value1' AND foo = 'value2' };", 1, (p) -> p.properties(new PropertyDefinitions(validProperties)));
     }
 
     private void parseAndCountErrors(String cql, int expectedErrors, ParserOperation operation) throws RecognitionException

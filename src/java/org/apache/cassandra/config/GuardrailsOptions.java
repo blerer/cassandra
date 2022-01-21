@@ -30,6 +30,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.cql3.statements.schema.TableAttributes;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.guardrails.GuardrailsConfig;
+import org.apache.cassandra.schema.TableParams;
 
 import static java.lang.String.format;
 import static java.util.stream.Collectors.toSet;

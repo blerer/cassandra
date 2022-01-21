@@ -177,7 +177,6 @@ public final class CreateTableStatement extends AlterSchemaStatement
 
     public TableMetadata.Builder builder(Types types)
     {
-        attrs.validate();
         TableParams params = attrs.asNewTableParams();
 
         // use a TreeMap to preserve ordering across JDK versions (see CASSANDRA-9492) - important for stable unit tests
@@ -296,8 +295,9 @@ public final class CreateTableStatement extends AlterSchemaStatement
 
         TableMetadata.Builder builder = TableMetadata.builder(keyspaceName, tableName);
 
-        if (attrs.hasProperty(TableAttributes.ID))
-            builder.id(attrs.getId());
+        Optional<TableId> mayBeId = attrs.getId();
+        if (mayBeId.isPresent())
+            builder.id(mayBeId.get());
 
         builder.isCounter(hasCounters)
                .params(params);

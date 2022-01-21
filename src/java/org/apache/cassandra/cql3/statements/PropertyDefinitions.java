@@ -18,7 +18,11 @@
 package org.apache.cassandra.cql3.statements;
 
 import java.util.*;
+import java.util.function.Function;
 import java.util.regex.Pattern;
+
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Sets;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,36 +31,162 @@ import org.apache.cassandra.exceptions.SyntaxException;
 
 public class PropertyDefinitions
 {
-    private static final Pattern PATTERN_POSITIVE = Pattern.compile("(1|true|yes)");
-    
+    /**
+     * An operation that should be applied to a property value.
+     *
+     * @param <T> the property value type
+     */
+    public interface PropertyOperation<T> extends Function<T, T>
+    {
+        /**
+         * Applies the operation to the property value
+         */
+        T apply(T t);
+
+        /**
+         * Compose this operation with the previous one 
+         * 
+         * @param before the previous operation that should be applied on the property value
+         * @return a new operation
+         */
+        PropertyOperation<T> compose(PropertyOperation<T> before);
+    };
+
+    /**
+     * An operation that fully override the original property value 
+     *
+     * @param <T> the property value type
+     */
+    public static final class SetOperation<T> implements PropertyOperation<T>
+    {
+        /**
+         * The property
+         */
+        private final String name;
+
+        /**
+         * The new value of the property
+         */
+        private final T value;
+
+        public SetOperation(String name, T value)
+        {
+            this.name = name;
+            this.value = value;
+        }
+
+        @Override
+        public T apply(T t)
+        {
+            return value;
+        }
+
+        @Override
+        public PropertyOperation<T> compose(PropertyOperation<T> before)
+        {
+              if (before instanceof SetOperation)
+                  throw new SyntaxException(String.format("Multiple definition for property '%s'", name));
+
+              throw new SyntaxException(String.format("Cannot perform set and update operation on the same property '%s'", name));
+        }
+    }
+
+    /**
+     * An operation that put and remove some new key-values into a Map property 
+     */
+    public static final class MapValuesOperation implements PropertyOperation<Map<String, String>>
+    {
+        /**
+         * The property name
+         */
+        private final String name;
+
+        /**
+         * The new key-values to put in the property value
+         */
+        private final Map<String, String> toPut;
+
+        /**
+         * The new key-values to remove from the property value
+         */
+        private final Set<String> toRemove;
+
+        public MapValuesOperation(String name, Map<String, String> toPut, Set<String> toRemove)
+        {
+            this.name = name;
+            this.toPut = toPut;
+            this.toRemove = toRemove;
+        }
+
+        @Override
+        public Map<String, String> apply(Map<String, String> t)
+        {
+            Map<String, String> copy = new HashMap<>(t);
+            copy.putAll(toPut);
+            toRemove.forEach(copy::remove);
+            return copy;
+        }
+
+        @Override
+        public PropertyOperation<Map<String, String>> compose(PropertyOperation<Map<String, String>> before)
+        {
+            if (before instanceof SetOperation)
+                throw new SyntaxException(String.format("Cannot perform set and update operation on the same property '%s'", name));
+
+            MapValuesOperation beforeOperation = (MapValuesOperation) before;
+
+            Map<String, String> newToPut = new HashMap<>(beforeOperation.toPut);
+            newToPut.putAll(toPut);
+
+            Set<String> newToRemove = new HashSet<>(beforeOperation.toRemove);
+            newToRemove.addAll(toRemove);
+
+            return new MapValuesOperation(name, newToPut, newToRemove);
+        }
+    }
+
     protected static final Logger logger = LoggerFactory.getLogger(PropertyDefinitions.class);
 
-    protected final Map<String, Object> properties = new HashMap<String, Object>();
+    private static final Pattern PATTERN_POSITIVE = Pattern.compile("(1|true|yes)");
+
+    private final Set<String> validProperties;
+
+    private final Set<String> obsoleteProperties;
+
+    private final Map<String, PropertyOperation<?>> operations = new HashMap<>();
+
+    public PropertyDefinitions(Set<String> validProperties)
+    {
+        this(validProperties, ImmutableSet.of());
+    }
+
+    public PropertyDefinitions(Set<String> validProperties, Set<String> obsoleteProperties)
+    {
+        this.validProperties = validProperties;
+        this.obsoleteProperties = obsoleteProperties;
+    }
 
     public void addProperty(String name, String value) throws SyntaxException
     {
-        if (properties.put(name, value) != null)
-            throw new SyntaxException(String.format("Multiple definition for property '%s'", name));
+        validate(name);
+        operations.merge(name, new SetOperation<>(name, value), PropertyOperation::compose);
     }
 
     public void addProperty(String name, Map<String, String> value) throws SyntaxException
     {
-        if (properties.put(name, value) != null)
-            throw new SyntaxException(String.format("Multiple definition for property '%s'", name));
+        validate(name);
+        operations.merge(name, new SetOperation<>(name, value), PropertyOperation::compose);
     }
 
-    public void validate(Set<String> keywords, Set<String> obsolete) throws SyntaxException
+    private void validate(String name)
     {
-        for (String name : properties.keySet())
-        {
-            if (keywords.contains(name))
-                continue;
+        if (validProperties.contains(name))
+            return;
 
-            if (obsolete.contains(name))
-                logger.warn("Ignoring obsolete property {}", name);
-            else
-                throw new SyntaxException(String.format("Unknown property '%s'", name));
-        }
+        if (obsoleteProperties.contains(name))
+            logger.warn("Ignoring obsolete property {}", name);
+        else
+            throw new SyntaxException(String.format("Unknown property '%s'", name));
     }
 
     /**
@@ -64,96 +194,77 @@ public class PropertyDefinitions
      */
     public Set<String> updatedProperties()
     {
-        return properties.keySet();
+        return operations.keySet();
     }
 
     public void removeProperty(String name)
     {
-        properties.remove(name);
+        operations.remove(name);
     }
 
-    protected String getSimple(String name) throws SyntaxException
+    protected String getString(Enum<?> property, String currentValue)
     {
-        Object val = properties.get(name);
-        if (val == null)
-            return null;
-        if (!(val instanceof String))
-            throw new SyntaxException(String.format("Invalid value for property '%s'. It should be a string", name));
-        return (String)val;
+        PropertyOperation<String> operation = getOperation(property);
+        return operation == null ? currentValue : operation.apply(currentValue);
     }
 
-    protected Map<String, String> getMap(String name) throws SyntaxException
+    protected Map<String, String> getMap(Enum<?> property, Map<String, String> currentValue)
     {
-        Object val = properties.get(name);
-        if (val == null)
-            return null;
-        if (!(val instanceof Map))
-            throw new SyntaxException(String.format("Invalid value for property '%s'. It should be a map.", name));
-        return (Map<String, String>)val;
+        PropertyOperation<Map<String, String>> operation = getOperation(property);
+
+        return operation == null ? currentValue : operation.apply(currentValue);
     }
 
-    public Boolean hasProperty(String name)
+    protected boolean getBoolean(Enum<?> property, boolean currentValue)
     {
-        return properties.containsKey(name);
+        String value = getString(property, Boolean.toString(currentValue));
+        return PATTERN_POSITIVE.matcher(value.toLowerCase()).matches();
     }
 
-    public String getString(String key, String defaultValue) throws SyntaxException
+    protected int getInt(Enum<?> property, int currentValue)
     {
-        String value = getSimple(key);
-        return value != null ? value : defaultValue;
+        PropertyOperation<String> operation = getOperation(property);
+        return operation == null ? currentValue : toInt(property, operation.apply(null));
     }
 
-    // Return a property value, typed as a Boolean
-    public Boolean getBoolean(String key, Boolean defaultValue) throws SyntaxException
+    protected double getDouble(Enum<?> property, double currentValue)
     {
-        String value = getSimple(key);
-        return (value == null) ? defaultValue : PATTERN_POSITIVE.matcher(value.toLowerCase()).matches();
+        PropertyOperation<String> operation = getOperation(property);
+        return operation == null ? currentValue : toDouble(property, operation.apply(null));
     }
 
-    // Return a property value, typed as a double
-    public double getDouble(String key, double defaultValue) throws SyntaxException
+    private <T> PropertyOperation<T> getOperation(Enum<?> property)
     {
-        String value = getSimple(key);
-        if (value == null)
+        return (PropertyOperation<T>) operations.get(property.toString());
+    }
+
+    public boolean hasOperationsFor(Enum<?> property)
+    {
+        return operations.containsKey(property.toString());
+    }
+
+    private static int toInt(Enum<?> property, String value)
+    {
+        try
         {
-            return defaultValue;
+            return Integer.parseInt(value);
         }
-        else
+        catch (NumberFormatException e)
         {
-            try
-            {
-                return Double.parseDouble(value);
-            }
-            catch (NumberFormatException e)
-            {
-                throw new SyntaxException(String.format("Invalid double value %s for '%s'", value, key));
-            }
+            throw new SyntaxException(String.format("Invalid integer value %s for '%s'", value, property));
         }
     }
 
-    // Return a property value, typed as an Integer
-    public Integer getInt(String key, Integer defaultValue) throws SyntaxException
+    private static double toDouble(Enum<?> property, String value)
     {
-        String value = getSimple(key);
-        return toInt(key, value, defaultValue);
-    }
-
-    public static Integer toInt(String key, String value, Integer defaultValue) throws SyntaxException
-    {
-        if (value == null)
+        try
         {
-            return defaultValue;
+            return Double.parseDouble(value);
         }
-        else
+        catch (NumberFormatException e)
         {
-            try
-            {
-                return Integer.valueOf(value);
-            }
-            catch (NumberFormatException e)
-            {
-                throw new SyntaxException(String.format("Invalid integer value %s for '%s'", value, key));
-            }
+            throw new SyntaxException(String.format("Invalid double value %s for '%s'", value, property));
         }
     }
 }
+

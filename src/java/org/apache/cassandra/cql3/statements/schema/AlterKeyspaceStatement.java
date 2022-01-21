@@ -62,8 +62,6 @@ public final class AlterKeyspaceStatement extends AlterSchemaStatement
 
     public Keyspaces apply(Keyspaces schema)
     {
-        attrs.validate();
-
         KeyspaceMetadata keyspace = schema.getNullable(keyspaceName);
         if (null == keyspace)
             throw ire("Keyspace '%s' doesn't exist", keyspaceName);

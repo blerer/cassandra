@@ -18,8 +18,9 @@
 package org.apache.cassandra.cql3.statements.schema;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
-import com.google.common.collect.ImmutableSet;
+import com.google.monitoring.runtime.instrumentation.common.collect.ImmutableSet;
 
 import org.apache.cassandra.cql3.statements.PropertyDefinitions;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -29,58 +30,35 @@ import org.apache.cassandra.schema.ReplicationParams;
 
 public final class KeyspaceAttributes extends PropertyDefinitions
 {
-    private static final Set<String> validKeywords;
-    private static final Set<String> obsoleteKeywords;
-
-    static
+    private static final Set<String> VALID_PROPERTIES = ImmutableSet.copyOf(EnumSet.allOf(KeyspaceParams.Option.class)
+                                                                                   .stream()
+                                                                                   .map(Object::toString)
+                                                                                   .collect(Collectors.toSet()));
+    
+    public KeyspaceAttributes()
     {
-        ImmutableSet.Builder<String> validBuilder = ImmutableSet.builder();
-        for (Option option : Option.values())
-            validBuilder.add(option.toString());
-        validKeywords = validBuilder.build();
-        obsoleteKeywords = ImmutableSet.of();
-    }
-
-    public void validate()
-    {
-        validate(validKeywords, obsoleteKeywords);
-
-        Map<String, String> replicationOptions = getAllReplicationOptions();
-        if (!replicationOptions.isEmpty() && !replicationOptions.containsKey(ReplicationParams.CLASS))
-            throw new ConfigurationException("Missing replication strategy class");
-    }
-
-    private String getReplicationStrategyClass()
-    {
-        return getAllReplicationOptions().get(ReplicationParams.CLASS);
-    }
-
-    private Map<String, String> getAllReplicationOptions()
-    {
-        Map<String, String> replication = getMap(Option.REPLICATION.toString());
-        return replication == null
-             ? Collections.emptyMap()
-             : replication;
+        super(VALID_PROPERTIES);
     }
 
     KeyspaceParams asNewKeyspaceParams()
     {
-        boolean durableWrites = getBoolean(Option.DURABLE_WRITES.toString(), KeyspaceParams.DEFAULT_DURABLE_WRITES);
-        return KeyspaceParams.create(durableWrites, getAllReplicationOptions());
+        if (!hasOperationsFor(Option.REPLICATION))
+            throw new ConfigurationException(String.format("Missing mandatory option '%s'", Option.REPLICATION));
+
+        Map<String, String> replicationOptions = getMap(Option.REPLICATION, Collections.emptyMap());
+
+        if (!replicationOptions.isEmpty() && !replicationOptions.containsKey(ReplicationParams.CLASS))
+            throw new ConfigurationException("Missing replication strategy class");
+
+        boolean durableWrites = getBoolean(Option.DURABLE_WRITES, KeyspaceParams.DEFAULT_DURABLE_WRITES);
+        return KeyspaceParams.create(durableWrites, replicationOptions);
     }
 
     KeyspaceParams asAlteredKeyspaceParams(KeyspaceParams previous)
     {
-        boolean durableWrites = getBoolean(Option.DURABLE_WRITES.toString(), previous.durableWrites);
-        Map<String, String> previousOptions = previous.replication.options;
-        ReplicationParams replication = getReplicationStrategyClass() == null
-                                      ? previous.replication
-                                      : ReplicationParams.fromMapWithDefaults(getAllReplicationOptions(), previousOptions);
-        return new KeyspaceParams(durableWrites, replication);
+        boolean durableWrites = getBoolean(Option.DURABLE_WRITES, previous.durableWrites);
+        Map<String, String> replicationOptions = getMap(Option.REPLICATION, previous.replication.asMap());
+        return KeyspaceParams.create(durableWrites, replicationOptions);
     }
 
-    public boolean hasOption(Option option)
-    {
-        return hasProperty(option.toString());
-    }
 }

@@ -37,7 +37,6 @@ import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.locator.LocalStrategy;
 import org.apache.cassandra.schema.KeyspaceMetadata;
-import org.apache.cassandra.schema.KeyspaceParams.Option;
 import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.schema.Schema;
@@ -62,11 +61,6 @@ public final class CreateKeyspaceStatement extends AlterSchemaStatement
 
     public Keyspaces apply(Keyspaces schema)
     {
-        attrs.validate();
-
-        if (!attrs.hasOption(Option.REPLICATION))
-            throw ire("Missing mandatory option '%s'", Option.REPLICATION);
-
         if (schema.containsKeyspace(keyspaceName))
         {
             if (ifNotExists)

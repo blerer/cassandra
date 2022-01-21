@@ -56,7 +56,8 @@ public final class TableParams
         ADDITIONAL_WRITE_POLICY,
         CRC_CHECK_CHANCE,
         CDC,
-        READ_REPAIR;
+        READ_REPAIR,
+        ID;
 
         @Override
         public String toString()
