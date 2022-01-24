@@ -18,11 +18,9 @@
 package org.apache.cassandra.cql3.statements;
 
 import java.util.*;
-import java.util.function.Function;
 import java.util.regex.Pattern;
 
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Sets;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,7 +34,7 @@ public class PropertyDefinitions
      *
      * @param <T> the property value type
      */
-    public interface PropertyOperation<T> extends Function<T, T>
+    public interface PropertyOperation<T>
     {
         /**
          * Applies the operation to the property value
@@ -49,7 +47,7 @@ public class PropertyDefinitions
          * @param before the previous operation that should be applied on the property value
          * @return a new operation
          */
-        PropertyOperation<T> compose(PropertyOperation<T> before);
+        PropertyOperation<?> compose(PropertyOperation<?> before);
     };
 
     /**
@@ -82,7 +80,7 @@ public class PropertyDefinitions
         }
 
         @Override
-        public PropertyOperation<T> compose(PropertyOperation<T> before)
+        public PropertyOperation<T> compose(PropertyOperation<?> before)
         {
               if (before instanceof SetOperation)
                   throw new SyntaxException(String.format("Multiple definition for property '%s'", name));
@@ -128,7 +126,7 @@ public class PropertyDefinitions
         }
 
         @Override
-        public PropertyOperation<Map<String, String>> compose(PropertyOperation<Map<String, String>> before)
+        public PropertyOperation<?> compose(PropertyOperation<?> before)
         {
             if (before instanceof SetOperation)
                 throw new SyntaxException(String.format("Cannot perform set and update operation on the same property '%s'", name));
@@ -169,13 +167,13 @@ public class PropertyDefinitions
     public void addProperty(String name, String value) throws SyntaxException
     {
         validate(name);
-        operations.merge(name, new SetOperation<>(name, value), PropertyOperation::compose);
+        operations.merge(name, new SetOperation<>(name, value), PropertyDefinitions::compose);
     }
 
     public void addProperty(String name, Map<String, String> value) throws SyntaxException
     {
         validate(name);
-        operations.merge(name, new SetOperation<>(name, value), PropertyOperation::compose);
+        operations.merge(name, new SetOperation<>(name, value), PropertyDefinitions::compose);
     }
 
     private void validate(String name)
@@ -238,6 +236,11 @@ public class PropertyDefinitions
         return (PropertyOperation<T>) operations.get(property.toString());
     }
 
+    private static PropertyOperation<?> compose(PropertyOperation<?> before, PropertyOperation<?> after)
+    {
+        return after.compose(before);
+    }
+    
     public boolean hasOperationsFor(Enum<?> property)
     {
         return operations.containsKey(property.toString());

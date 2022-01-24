@@ -20,7 +20,7 @@ package org.apache.cassandra.cql3.statements.schema;
 import java.util.*;
 import java.util.stream.Collectors;
 
-import com.google.monitoring.runtime.instrumentation.common.collect.ImmutableSet;
+import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.cql3.statements.PropertyDefinitions;
 import org.apache.cassandra.exceptions.ConfigurationException;
