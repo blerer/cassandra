@@ -72,6 +72,8 @@ public class NetworkTopologyStrategy extends AbstractReplicationStrategy
 
         int replicas = 0;
         int trans = 0;
+        System.out.println("////////////////////////////////////////////////////////////////////////////////");
+        System.out.println(configOptions);
         Map<String, ReplicationFactor> newDatacenters = new HashMap<>();
         if (configOptions != null)
         {

@@ -20,62 +20,71 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import org.junit.After;
+import java.util.EnumSet;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import com.google.common.collect.ImmutableSet;
+
 import org.junit.Test;
-import org.junit.Before;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
-public class PropertyDefinitionsTest {
-    
-    PropertyDefinitions pd;
-    
-    @Before
-    public void setUp()
+public class PropertyDefinitionsTest 
+{
+    enum Option
     {
-        pd = new PropertyDefinitions();
+        KEY_EXISTING,
+        KEY_MISSING;
+
+        @Override
+        public String toString()
+        {
+            return name().toLowerCase();
+        }
     }
-    
-    @After
-    public void clear()
-    {
-        pd = null;
-    }
-    
+
+    private static final Set<String> VALID_PROPERTIES = ImmutableSet.copyOf(EnumSet.allOf(Option.class)
+                                                                                   .stream()
+                                                                                   .map(Object::toString)
+                                                                                   .collect(Collectors.toSet()));
 
     @Test
     public void testGetBooleanExistant()
     {
-        String key = "one";
-        pd.addProperty(key, "1");
-        assertEquals(Boolean.TRUE, pd.getBoolean(key, null));
-        
-        key = "TRUE";
-        pd.addProperty(key, "TrUe");
-        assertEquals(Boolean.TRUE, pd.getBoolean(key, null));
-        
-        key = "YES";
-        pd.addProperty(key, "YeS");
-        assertEquals(Boolean.TRUE, pd.getBoolean(key, null));
-   
-        key = "BAD_ONE";
-        pd.addProperty(key, " 1");
-        assertEquals(Boolean.FALSE, pd.getBoolean(key, null));
-        
-        key = "BAD_TRUE";
-        pd.addProperty(key, "true ");
-        assertEquals(Boolean.FALSE, pd.getBoolean(key, null));
-        
-        key = "BAD_YES";
-        pd.addProperty(key, "ye s");
-        assertEquals(Boolean.FALSE, pd.getBoolean(key, null));
+        PropertyDefinitions pd = newPropertyDefinition("1");
+        assertTrue(pd.getBoolean(Option.KEY_EXISTING, false));
+
+        pd = newPropertyDefinition("TrUe");
+        assertTrue(pd.getBoolean(Option.KEY_EXISTING, false));
+
+        pd = newPropertyDefinition("YeS");
+        assertTrue(pd.getBoolean(Option.KEY_EXISTING, false));
+
+        pd = newPropertyDefinition(" 1");
+        assertFalse(pd.getBoolean(Option.KEY_EXISTING, false));
+
+        pd = newPropertyDefinition("true ");
+        assertFalse(pd.getBoolean(Option.KEY_EXISTING, false));
+
+        pd = newPropertyDefinition("ye s");
+        assertFalse(pd.getBoolean(Option.KEY_EXISTING, false));
     }
-    
+
+    private PropertyDefinitions newPropertyDefinition(String value)
+    {
+        PropertyDefinitions pd = new PropertyDefinitions(VALID_PROPERTIES);
+        pd.addProperty(Option.KEY_EXISTING.toString(), value);
+        return pd;
+    }
+
     @Test
     public void testGetBooleanNonexistant()
     {
-        assertEquals(Boolean.FALSE, pd.getBoolean("nonexistant", Boolean.FALSE));
-        assertEquals(Boolean.TRUE, pd.getBoolean("nonexistant", Boolean.TRUE));
+        PropertyDefinitions pd = new PropertyDefinitions(VALID_PROPERTIES);
+        assertFalse(pd.getBoolean(Option.KEY_MISSING, false));
+        assertTrue(pd.getBoolean(Option.KEY_MISSING, true));
     }
     
 }

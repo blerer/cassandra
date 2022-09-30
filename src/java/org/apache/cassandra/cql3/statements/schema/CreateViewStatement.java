@@ -299,29 +299,15 @@ public final class CreateViewStatement extends AlterSchemaStatement
         }
 
         /*
-         * Validate WITH params
-         */
-
-        attrs.validate();
-
-        if (attrs.hasOption(TableParams.Option.DEFAULT_TIME_TO_LIVE)
-            && attrs.getInt(TableParams.Option.DEFAULT_TIME_TO_LIVE.toString(), 0) != 0)
-        {
-            throw ire("Cannot set default_time_to_live for a materialized view. " +
-                      "Data in a materialized view always expire at the same time than " +
-                      "the corresponding data in the parent table.");
-        }
-
-        /*
          * Build the thing
          */
-
         TableMetadata.Builder builder = TableMetadata.builder(keyspaceName, viewName);
 
-        if (attrs.hasProperty(TableAttributes.ID))
-            builder.id(attrs.getId());
+        Optional<TableId> mayBeId = attrs.getId();
+        if (mayBeId.isPresent())
+            builder.id(mayBeId.get());
 
-        builder.params(attrs.asNewTableParams())
+        builder.params(attrs.asNewTableParamsForMaterializedView())
                .kind(TableMetadata.Kind.VIEW);
 
         partitionKeyColumns.forEach(name -> builder.addPartitionKeyColumn(name, getType(table, name)));
