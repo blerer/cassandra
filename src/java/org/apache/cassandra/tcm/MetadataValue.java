@@ -18,8 +18,17 @@
 
 package org.apache.cassandra.tcm;
 
+/**
+ * A Cluster metadata element that associate epoch to a given value
+ * @param <V>
+ */
 public interface MetadataValue<V>
 {
     V withLastModified(Epoch epoch);
+
+    /**
+     * Returns the epoch at which this value was last modified.
+     * @return the epoch at which this value was last modified.
+     */
     Epoch lastModified();
 }
