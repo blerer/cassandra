@@ -303,7 +303,7 @@ public final class SimpleRestriction implements SingleRestriction
                 List<ByteBuffer> buffers = bindAndGet(options);
 
                 ColumnMetadata column = firstColumn();
-                if (operator == Operator.IN)
+                if (operator == Operator.IN || operator == Operator.NOT_IN)
                 {
                     filter.add(column, operator, inValues(column, buffers));
                 }

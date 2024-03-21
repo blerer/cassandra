@@ -26,7 +26,6 @@ import org.apache.cassandra.cql3.terms.Terms;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
 public final class Relation
 {
@@ -107,9 +106,6 @@ public final class Relation
      */
     public SingleRestriction toRestriction(TableMetadata table, VariableSpecifications boundNames)
     {
-        if (operator == Operator.NEQ)
-            throw invalidRequest("Unsupported '!=' relation: %s", this);
-
         ColumnsExpression expression = rawExpressions.prepare(table);
         expression.collectMarkerSpecification(boundNames);
 
