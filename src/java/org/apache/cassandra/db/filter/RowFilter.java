@@ -40,14 +40,12 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionPurger;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.TypeSizes;
-import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.ListType;
-import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.partitions.PartitionIterator;
@@ -315,7 +313,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
             ByteBuffer value = keyValidator instanceof CompositeType
                              ? ((CompositeType) keyValidator).split(key.getKey())[e.column.position()]
                              : key.getKey();
-            if (!e.operator().isSatisfiedBy(e.column.type, value, e.value))
+            if (e.operator().isSatisfiedBy(e.column.type, value, e.value).isNotTrue())
                 return false;
         }
         return true;
@@ -332,7 +330,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
             if (!e.column.isClusteringColumn())
                 continue;
 
-            if (!e.operator().isSatisfiedBy(e.column.type, clustering.bufferAt(e.column.position()), e.value))
+            if (e.operator().isSatisfiedBy(e.column.type, clustering.bufferAt(e.column.position()), e.value).isNotTrue())
             {
                 return false;
             }
@@ -492,7 +490,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
          * Returns whether the provided row satisfied this expression or not.
          *
          *
-         * @param metadata
+         * @param metadata the table metadata
          * @param partitionKey the partition key for row to check.
          * @param row the row to check. It should *not* contain deleted cells
          * (i.e. it should come from a RowIterator).
@@ -679,44 +677,18 @@ public class RowFilter implements Iterable<RowFilter.Expression>
             // TODO: we should try to merge both code someday.
             assert value != null;
 
-            if (operator.appliesToColumnValues())
+            if (operator.appliesToColumnValues() || !column.isComplex())
             {
-                assert !column.isComplex() : "Only CONTAINS and CONTAINS_KEY are supported for 'complex' types";
-
-                // In order to support operators on Counter types, their value has to be extracted from internal
-                // representation. See CASSANDRA-11629
-                if (column.type.isCounter())
-                {
-                    ByteBuffer foundValue = getValue(metadata, partitionKey, row);
-                    if (foundValue == null)
-                        return false;
-
-                    ByteBuffer counterValue = LongType.instance.decompose(CounterContext.instance().total(foundValue, ByteBufferAccessor.instance));
-                    return operator.isSatisfiedBy(LongType.instance, counterValue, value);
-                }
-                else
-                {
-                    // Note that CQL expression are always of the form 'x < 4', i.e. the tested value is on the left.
-                    ByteBuffer foundValue = getValue(metadata, partitionKey, row);
-                    return foundValue != null && operator.isSatisfiedBy(column.type, foundValue, value);
-                }
+                // Note that CQL expression are always of the form 'x < 4', i.e. the tested value is on the left.
+                ByteBuffer foundValue = getValue(metadata, partitionKey, row);
+                return operator.isSatisfiedBy(column.type, foundValue, value).isTrue();
             }
-            else if (operator.appliesToCollectionElements() || operator.appliesToMapKeys())
+            else
             {
                 assert column.type.isCollection();
-                CollectionType<?> type = (CollectionType<?>) column.type;
-                if (column.isComplex())
-                {
-                    ComplexColumnData complexData = row.getComplexColumnData(column);
-                    return complexData != null && operator.isSatisfiedBy(type, complexData, value);
-                }
-                else
-                {
-                    ByteBuffer foundValue = getValue(metadata, partitionKey, row);
-                    return foundValue != null && operator.isSatisfiedBy(column.type, foundValue, value);
-                }
+                ComplexColumnData complexData = row.getComplexColumnData(column);
+                return operator.isSatisfiedBy((CollectionType<?>) column.type, complexData, value).isTrue();
             }
-            throw new AssertionError();
         }
 
         @Override
@@ -796,7 +768,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
             if (column.isComplex())
             {
                 Cell<?> cell = row.getCell(column, CellPath.create(key));
-                return cell != null && operator.isSatisfiedBy(mt.getValuesType(), cell.buffer(), value);
+                return operator.isSatisfiedBy(mt.getValuesType(), cell == null ? null : cell.buffer(), value).isTrue();
             }
             else
             {
@@ -805,7 +777,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
                     return false;
 
                 ByteBuffer foundValue = mt.getSerializer().getSerializedValue(serializedMap, key, mt.getKeysType());
-                return foundValue != null && operator.isSatisfiedBy(mt.getValuesType(), foundValue, value);
+                return operator.isSatisfiedBy(mt.getValuesType(), foundValue, value).isTrue();
             }
         }
 

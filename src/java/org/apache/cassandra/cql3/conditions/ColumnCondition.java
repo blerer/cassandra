@@ -253,7 +253,7 @@ public abstract class ColumnCondition
                 // the condition value is not null, so only NEQ can return true
                 return operator == Operator.NEQ;
             }
-            return operator.isSatisfiedBy(type, otherValue, value);
+            return operator.isSatisfiedBy(type, otherValue, value).isTrue();
         }
     }
 

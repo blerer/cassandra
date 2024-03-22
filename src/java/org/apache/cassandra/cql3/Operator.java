@@ -28,9 +28,12 @@ import java.util.stream.Collectors;
 import com.google.common.collect.RangeSet;
 
 import org.apache.cassandra.cql3.restrictions.ClusteringElements;
+import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.ListType;
+import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.rows.Cell;
@@ -54,7 +57,7 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        boolean accept(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             return type.compareForCQL(leftOperand, rightOperand) == 0;
         }
@@ -96,7 +99,7 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        boolean accept(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             return type.compareForCQL(leftOperand, rightOperand) < 0;
         }
@@ -142,7 +145,7 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        boolean accept(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             return type.compareForCQL(leftOperand, rightOperand) <= 0;
         }
@@ -188,7 +191,7 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        boolean accept(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             return type.compareForCQL(leftOperand, rightOperand) >= 0;
         }
@@ -234,7 +237,7 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        boolean accept(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             return type.compareForCQL(leftOperand, rightOperand) > 0;
         }
@@ -273,7 +276,7 @@ public enum Operator
     },
     IN(7)
     {
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        boolean accept(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             ListSerializer<?> serializer = ListType.getInstance(type, false).getSerializer();
             return serializer.anyMatch(rightOperand, r -> type.compareForCQL(leftOperand, r) == 0);
@@ -294,7 +297,7 @@ public enum Operator
     CONTAINS(5)
     {
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        boolean accept(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             switch(((CollectionType<?>) type).kind)
             {
@@ -312,22 +315,25 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(CollectionType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        public ThreeValued isSatisfiedBy(CollectionType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
         {
+            if (leftOperand == null)
+                return ThreeValued.UNKOWN;
+
             for (Cell<?> cell : leftOperand)
             {
                 if (type.kind == CollectionType.Kind.SET)
                 {
                     if (type.nameComparator().compare(cell.path().get(0), rightOperand) == 0)
-                        return true;
+                        return ThreeValued.TRUE;
                 }
                 else
                 {
                     if (type.valueComparator().compare(cell.buffer(), rightOperand) == 0)
-                        return true;
+                        return ThreeValued.TRUE;
                 }
             }
-            return false;
+            return ThreeValued.FALSE;
         }
 
         @Override
@@ -351,16 +357,17 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        boolean accept(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             MapType<?, ?> mapType = (MapType<?, ?>) type;
             return mapType.compose(leftOperand).containsKey(mapType.getKeysType().compose(rightOperand));
         }
 
         @Override
-        public boolean isSatisfiedBy(CollectionType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        public ThreeValued isSatisfiedBy(CollectionType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
         {
-            return leftOperand.getCell(CellPath.create(rightOperand)) != null;
+            return leftOperand == null ? ThreeValued.UNKOWN
+                                       : ThreeValued.of(leftOperand.getCell(CellPath.create(rightOperand)) != null);
         }
 
         @Override
@@ -384,7 +391,7 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        boolean accept(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             return type.compareForCQL(leftOperand, rightOperand) != 0;
         }
@@ -416,7 +423,7 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        boolean accept(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             throw new UnsupportedOperationException();
         }
@@ -436,7 +443,7 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        boolean accept(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             return ByteBufferUtil.startsWith(leftOperand, rightOperand);
         }
@@ -450,7 +457,7 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        boolean accept(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             return ByteBufferUtil.endsWith(leftOperand, rightOperand);
         }
@@ -464,7 +471,7 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        boolean accept(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             return ByteBufferUtil.contains(leftOperand, rightOperand);
         }
@@ -477,7 +484,7 @@ public enum Operator
             return "LIKE '<term>'";
         }
 
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        boolean accept(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             return ByteBufferUtil.contains(leftOperand, rightOperand);
         }
@@ -485,7 +492,7 @@ public enum Operator
     LIKE(14)
     {
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        boolean accept(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             throw new UnsupportedOperationException();
         }
@@ -499,7 +506,7 @@ public enum Operator
     ANN(15)
     {
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        boolean accept(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             // The ANN operator is only supported by the vector index so, normally, should never be called directly.
             // In networked queries (non-local) the coordinator will end up calling the row filter directly. So, this
@@ -561,14 +568,33 @@ public enum Operator
           throw new IOException(String.format("Cannot resolve Relation.Type from binary representation: %s", b));
     }
 
-
     /**
      * Whether 2 values satisfy this operator (given the type they should be compared with).
      */
-    public abstract boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand);
+    public ThreeValued isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+    {
+        if (leftOperand == null)
+            return ThreeValued.UNKOWN;
 
+        // In order to support operators on Counter types, their value has to be extracted from internal
+        // representation. See CASSANDRA-11629
+        boolean accepted = type.isCounter() ? accept(LongType.instance, toCounterValue(leftOperand), rightOperand)
+                                            : accept(type, leftOperand, rightOperand);
 
-    public boolean isSatisfiedBy(CollectionType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        return ThreeValued.of(accepted);
+    }
+
+    private static ByteBuffer toCounterValue(ByteBuffer leftOperand)
+    {
+        return LongType.instance.decompose(CounterContext.instance().total(leftOperand, ByteBufferAccessor.instance));
+    }
+
+    boolean accept(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    public ThreeValued isSatisfiedBy(CollectionType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
     {
         throw new UnsupportedOperationException();
     }
