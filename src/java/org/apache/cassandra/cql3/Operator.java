@@ -414,24 +414,36 @@ public enum Operator
             return false;
         }
     },
-    IS_NOT(9)
+    IS_NOT_NULL(9)
     {
+        @Override
+        public boolean isUnary()
+        {
+            return true;
+        }
+
+        @Override
+        public ThreeValued isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return ThreeValued.of(leftOperand != null);
+        }
+
+        @Override
+        public boolean requiresFilteringOrIndexingFor(ColumnMetadata.Kind columnKind)
+        {
+            return !columnKind.isPrimaryKeyKind();
+        }
+
+        @Override
+        public boolean canBeUsedWith(ColumnsExpression.Kind kind)
+        {
+            return kind == ColumnsExpression.Kind.SINGLE_COLUMN || kind == ColumnsExpression.Kind.MAP_ELEMENT;
+        }
+
         @Override
         public String toString()
         {
-            return "IS NOT";
-        }
-
-        @Override
-        boolean accept(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        protected boolean isSupportedByReadPath()
-        {
-            return false;
+            return "IS NOT NULL";
         }
     },
     LIKE_PREFIX(10)
@@ -492,12 +504,6 @@ public enum Operator
     LIKE(14)
     {
         @Override
-        boolean accept(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
         public boolean requiresIndexing()
         {
             return true;
@@ -505,15 +511,6 @@ public enum Operator
     },
     ANN(15)
     {
-        @Override
-        boolean accept(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
-        {
-            // The ANN operator is only supported by the vector index so, normally, should never be called directly.
-            // In networked queries (non-local) the coordinator will end up calling the row filter directly. So, this
-            // needs to return true so that the returned values are allowed through to the VectorTopKProcessor
-            throw new UnsupportedOperationException();
-        }
-
         @Override
         public boolean requiresIndexing()
         {
@@ -533,6 +530,15 @@ public enum Operator
     Operator(int b)
     {
         this.b = b;
+    }
+
+    /**
+     * Checks if the operator is a unary operator.
+     * @return {@code true} if the operator is a unary operator, {@code false} otherwise.
+     */
+    public boolean isUnary()
+    {
+        return false;
     }
 
     /**

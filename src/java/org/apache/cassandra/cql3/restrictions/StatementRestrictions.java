@@ -99,8 +99,6 @@ public final class StatementRestrictions
      */
     private RestrictionSet nonPrimaryKeyRestrictions;
 
-    private Set<ColumnMetadata> notNullColumns;
-
     /**
      * The restrictions used to build the row filter
      */
@@ -141,7 +139,6 @@ public final class StatementRestrictions
         this.partitionKeyRestrictions = new PartitionKeyRestrictions(table.partitionKeyAsClusteringComparator());
         this.clusteringColumnsRestrictions = new ClusteringColumnRestrictions(table, allowFiltering);
         this.nonPrimaryKeyRestrictions = RestrictionSet.empty();
-        this.notNullColumns = new HashSet<>();
     }
 
     public StatementRestrictions(ClientState state,
@@ -196,16 +193,9 @@ public final class StatementRestrictions
                 throw invalidRequest("Cannot use %s with %s", type, operator);
             }
 
-            if (operator == Operator.IS_NOT)
+            if (operator.requiresIndexing())
             {
-                if (!forView)
-                    throw new InvalidRequestException("Unsupported restriction: " + relation);
-
-                this.notNullColumns.addAll(relation.toRestriction(table, boundNames).columns());
-            }
-            else if (operator.requiresIndexing())
-            {
-                Restriction restriction = relation.toRestriction(table, boundNames);
+                SimpleRestriction restriction = relation.toRestriction(table, boundNames);
 
                 if (!type.allowUseOfSecondaryIndices() || !restriction.hasSupportingIndex(indexRegistry))
                     throw invalidRequest("%s restriction is only supported on properly " +
@@ -360,12 +350,16 @@ public final class StatementRestrictions
         return !tableNullable.allowFilteringImplicitly();
     }
 
-    private void addRestriction(Restriction restriction, IndexRegistry indexRegistry)
+    private void addRestriction(SimpleRestriction restriction, IndexRegistry indexRegistry)
     {
-        ColumnMetadata def = restriction.firstColumn();
-        if (def.isPartitionKey())
+        ColumnMetadata column = restriction.firstColumn();
+
+        if (column.isPrimaryKeyColumn() && restriction.operator() == Operator.IS_NOT_NULL)
+            return;
+
+        if (column.isPartitionKey())
             partitionKeyRestrictions = partitionKeyRestrictions.mergeWith(restriction);
-        else if (def.isClusteringColumn())
+        else if (column.isClusteringColumn())
             clusteringColumnsRestrictions = clusteringColumnsRestrictions.mergeWith(restriction, indexRegistry);
         else
             nonPrimaryKeyRestrictions = nonPrimaryKeyRestrictions.addRestriction((SingleRestriction) restriction);
@@ -389,7 +383,7 @@ public final class StatementRestrictions
      * by an IS NOT NULL restriction will be included, otherwise they will not be included (unless another restriction
      * applies to them).
      */
-    public Set<ColumnMetadata> nonPKRestrictedColumns(boolean includeNotNullRestrictions)
+    public Set<ColumnMetadata> nonPKRestrictedColumns()
     {
         Set<ColumnMetadata> columns = new HashSet<>();
         for (Restrictions r : filterRestrictions.getRestrictions())
@@ -397,15 +391,6 @@ public final class StatementRestrictions
             for (ColumnMetadata def : r.columns())
                 if (!def.isPrimaryKeyColumn())
                     columns.add(def);
-        }
-
-        if (includeNotNullRestrictions)
-        {
-            for (ColumnMetadata def : notNullColumns)
-            {
-                if (!def.isPrimaryKeyColumn())
-                    columns.add(def);
-            }
         }
 
         return columns;
@@ -416,9 +401,6 @@ public final class StatementRestrictions
      */
     public boolean isRestricted(ColumnMetadata column)
     {
-        if (notNullColumns.contains(column))
-            return true;
-
         return getRestrictions(column.kind).columns().contains(column);
     }
 
@@ -548,7 +530,7 @@ public final class StatementRestrictions
             if (partitionKeyRestrictions.isOnToken())
                 isKeyRange = true;
 
-            if (partitionKeyRestrictions.isEmpty() && partitionKeyRestrictions.hasUnrestrictedPartitionKeyComponents())
+            if (partitionKeyRestrictions.isEmpty())
             {
                 isKeyRange = true;
                 usesSecondaryIndexing = hasQueriableIndex;

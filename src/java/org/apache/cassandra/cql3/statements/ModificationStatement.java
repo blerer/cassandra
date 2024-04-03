@@ -63,7 +63,6 @@ import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.triggers.TriggerExecutor;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MD5Digest;
-import org.apache.cassandra.utils.Pair;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkNull;
@@ -921,14 +920,14 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
     {
         protected final StatementType type;
         private final Attributes.Raw attrs;
-        private final List<Pair<ColumnIdentifier, ColumnCondition.Raw>> conditions;
+        private final List<ColumnCondition.Raw> conditions;
         private final boolean ifNotExists;
         private final boolean ifExists;
 
         protected Parsed(QualifiedName name,
                          StatementType type,
                          Attributes.Raw attrs,
-                         List<Pair<ColumnIdentifier, ColumnCondition.Raw>> conditions,
+                         List<ColumnCondition.Raw> conditions,
                          boolean ifNotExists,
                          boolean ifExists)
         {
@@ -991,7 +990,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
         /**
          * Returns the column conditions.
          *
-         * @param metadata the column family meta data
+         * @param metadata the table meta data
          * @param bindVariables the bound names
          * @return the column conditions.
          */
@@ -1001,13 +1000,10 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
 
             ColumnConditions.Builder builder = ColumnConditions.newBuilder();
 
-            for (Pair<ColumnIdentifier, ColumnCondition.Raw> entry : conditions)
+            for (ColumnCondition.Raw rawCondition : conditions)
             {
-                ColumnMetadata def = metadata.getExistingColumn(entry.left);
-                ColumnCondition condition = entry.right.prepare(keyspace(), def, metadata);
+                ColumnCondition condition = rawCondition.prepare(metadata);
                 condition.collectMarkerSpecification(bindVariables);
-
-                checkFalse(def.isPrimaryKeyColumn(), "PRIMARY KEY column '%s' cannot have IF conditions", def.name);
                 builder.add(condition);
             }
             return builder.build();
@@ -1044,7 +1040,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
             return new StatementRestrictions(state, type, metadata, where, boundNames, orderings, applyOnlyToStaticColumns, false, false);
         }
 
-        public List<Pair<ColumnIdentifier, ColumnCondition.Raw>> getConditions()
+        public List<ColumnCondition.Raw> conditions()
         {
             return conditions;
         }

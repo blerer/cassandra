@@ -271,8 +271,7 @@ public final class ColumnsExpression
      */
     private final Term mapKey;
 
-
-    private ColumnsExpression(Kind kind, AbstractType<?> type, List<ColumnMetadata> columns, Term mapKey)
+    private ColumnsExpression(Kind kind, AbstractType<?> type, List<ColumnMetadata> columns,Term mapKey)
     {
         this.kind = kind;
         this.type = type;

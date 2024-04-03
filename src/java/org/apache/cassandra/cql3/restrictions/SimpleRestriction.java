@@ -300,16 +300,15 @@ public final class SimpleRestriction implements SingleRestriction
         switch (columnsExpression.kind())
         {
             case SINGLE_COLUMN:
-                List<ByteBuffer> buffers = bindAndGet(options);
 
                 ColumnMetadata column = firstColumn();
                 if (operator == Operator.IN)
                 {
-                    filter.add(column, operator, inValues(column, buffers));
+                    filter.add(column, operator, inValues(column, bindAndGet(options)));
                 }
                 else if (operator == Operator.LIKE)
                 {
-                    LikePattern pattern = LikePattern.parse(buffers.get(0));
+                    LikePattern pattern = LikePattern.parse(bindAndGet(options).get(0));
                     // there must be a suitable INDEX for LIKE_XXX expressions
                     RowFilter.SimpleExpression expression = filter.add(column, pattern.kind().operator(), pattern.value());
                     indexRegistry.getBestIndexFor(expression)
@@ -318,7 +317,7 @@ public final class SimpleRestriction implements SingleRestriction
                 }
                 else
                 {
-                    filter.add(column, operator, buffers.get(0));
+                    filter.add(column, operator, operator.isUnary() ? null : bindAndGet(options).get(0));
                 }
                 break;
             case MULTI_COLUMN:
@@ -354,8 +353,10 @@ public final class SimpleRestriction implements SingleRestriction
                 break;
             case MAP_ELEMENT:
                 ByteBuffer key = columnsExpression.mapKey(options);
-                List<ByteBuffer> values = bindAndGet(options);
-                filter.addMapEquality(firstColumn(), key, operator, values.get(0));
+                filter.addMapElementExpression(firstColumn(),
+                                               key,
+                                               operator,
+                                      operator.isUnary() ? null : bindAndGet(options).get(0));
                 break;
             default: throw new UnsupportedOperationException();
         }
@@ -369,6 +370,11 @@ public final class SimpleRestriction implements SingleRestriction
     @Override
     public String toString()
     {
-        return String.format("%s %s %s", columnsExpression.toCQLString(), operator, values);
+        StringBuilder builder = new StringBuilder().append(columnsExpression.toCQLString())
+                                                   .append(operator);
+        if (!operator.isUnary())
+            builder.append(values);
+
+        return builder.toString();
     }
 }

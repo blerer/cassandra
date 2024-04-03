@@ -65,8 +65,6 @@ public class SelectSingleColumnRelationTest extends CQLTester
                              "SELECT * FROM %s WHERE c = 0 AND b IN (?)", set(0));
         assertInvalidMessage("Unsupported '!=' relation: b != 5",
                 "SELECT * FROM %s WHERE c = 0 AND b != 5");
-        assertInvalidMessage("Unsupported restriction: b IS NOT NULL",
-                "SELECT * FROM %s WHERE c = 0 AND b IS NOT NULL");
     }
 
     @Test
@@ -645,8 +643,6 @@ public class SelectSingleColumnRelationTest extends CQLTester
         assertInvalidMessage(msg, "SELECT * FROM %s WHERE b LIKE ?", udt);
         assertInvalidMessage("Unsupported '!=' relation: b != {a: 0}",
                              "SELECT * FROM %s WHERE b != {a: 0}", udt);
-        assertInvalidMessage("Unsupported restriction: b IS NOT NULL",
-                             "SELECT * FROM %s WHERE b IS NOT NULL", udt);
         assertInvalidMessage("Cannot use CONTAINS on non-collection column b",
                              "SELECT * FROM %s WHERE b CONTAINS ?", udt);
     }
@@ -803,5 +799,162 @@ public class SelectSingleColumnRelationTest extends CQLTester
         assertRows(execute("SELECT * from %s WHERE pk = ? AND c > ? AND c <= ?", 1, -4, -1),
                    row(1, -2, -2),
                    row(1, -1, -1));
+    }
+
+    @Test
+    public void testSelectIsNotNull() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, c int, v int, PRIMARY KEY (pk, c))");
+
+        execute("INSERT INTO %s (pk, c, v) VALUES (1, 1, 1)");
+        execute("INSERT INTO %s (pk, c, v) VALUES (1, 2, 1)");
+        execute("INSERT INTO %s (pk, c, v) VALUES (1, 3, null)");
+        execute("INSERT INTO %s (pk, c, v) VALUES (2, 1, 1)");
+        execute("INSERT INTO %s (pk, c, v) VALUES (2, 2, null)");
+
+        assertRows(execute("SELECT * from %s"),
+                   row(1, 1, 1),
+                   row(1, 2, 1),
+                   row(1, 3, null),
+                   row(2, 1, 1),
+                   row(2, 2, null));
+
+        assertRows(execute("SELECT * from %s WHERE pk IS NOT NULL"),
+                   row(1, 1, 1),
+                   row(1, 2, 1),
+                   row(1, 3, null),
+                   row(2, 1, 1),
+                   row(2, 2, null));
+
+        assertRows(execute("SELECT * from %s WHERE pk IS NOT NULL AND pk = 1"),
+                   row(1, 1, 1),
+                   row(1, 2, 1),
+                   row(1, 3, null));
+
+        assertRows(execute("SELECT * from %s WHERE pk = 1 AND c IS NOT NULL"),
+                   row(1, 1, 1),
+                   row(1, 2, 1),
+                   row(1, 3, null));
+
+        assertRows(execute("SELECT * from %s WHERE pk = 1 AND c IS NOT NULL AND c IN (2, 3)"),
+                   row(1, 2, 1),
+                   row(1, 3, null));
+
+        assertRows(execute("SELECT * from %s WHERE pk = 1 AND c IS NOT NULL AND c >= 2"),
+                   row(1, 2, 1),
+                   row(1, 3, null));
+
+        assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                             "SELECT * from %s WHERE v IS NOT NULL");
+
+        assertRows(execute("SELECT * from %s WHERE v IS NOT NULL ALLOW FILTERING"),
+                   row(1, 1, 1),
+                   row(1, 2, 1),
+                   row(2, 1, 1));
+
+        assertRows(execute("SELECT * from %s WHERE pk = 1 AND v IS NOT NULL ALLOW FILTERING"),
+                   row(1, 1, 1),
+                   row(1, 2, 1));
+
+        createTable("CREATE TABLE %s (pk int, c int, m1 map<int, int>, m2 frozen<map<int, int>>, PRIMARY KEY (pk, c))");
+
+        execute("INSERT INTO %s (pk, c, m1, m2) VALUES (1, 1, {}, {})");
+        execute("INSERT INTO %s (pk, c, m1, m2) VALUES (1, 2, null, null)");
+        execute("INSERT INTO %s (pk, c, m1, m2) VALUES (1, 3, {1 : 1, 2 : 2}, {1 : 1, 2 : 2})");
+        execute("INSERT INTO %s (pk, c, m1, m2) VALUES (2, 1, null, null)");
+        execute("INSERT INTO %s (pk, c, m1, m2) VALUES (2, 2, {1 : 1, 2 : 2, 3 : 3}, {1 : 1, 2 : 2, 3 : 3})");
+
+        assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                             "SELECT * from %s WHERE m1[1] IS NOT NULL");
+
+        assertRows(execute("SELECT * from %s WHERE m1[1] IS NOT NULL ALLOW FILTERING"),
+                   row(1, 3, map(1, 1, 2, 2), map(1, 1, 2, 2)),
+                   row(2, 2, map(1, 1, 2, 2, 3, 3), map(1, 1, 2, 2, 3, 3)));
+
+        assertRows(execute("SELECT * from %s WHERE m1[3] IS NOT NULL ALLOW FILTERING"),
+                   row(2, 2, map(1, 1, 2, 2, 3, 3), map(1, 1, 2, 2, 3, 3)));
+
+        assertInvalidMessage("Map-entry predicates on frozen map column m2 are not supported",
+                             "SELECT * from %s WHERE m2[1] IS NOT NULL");
+
+        createTable("CREATE TABLE %s (pk1 int, pk2 int, c1 int, c2 int, v int, PRIMARY KEY ((pk1, pk2), c1, c2))");
+
+        execute("INSERT INTO %s (pk1, pk2, c1, c2, v) VALUES (1, 1, 1, 1, 1)");
+        execute("INSERT INTO %s (pk1, pk2, c1, c2, v) VALUES (1, 1, 1, 2, null)");
+        execute("INSERT INTO %s (pk1, pk2, c1, c2, v) VALUES (1, 2, 1, 1, 2)");
+        execute("INSERT INTO %s (pk1, pk2, c1, c2, v) VALUES (1, 2, 1, 2, 3)");
+        execute("INSERT INTO %s (pk1, pk2, c1, c2, v) VALUES (1, 3, 1, 1, 4)");
+        execute("INSERT INTO %s (pk1, pk2, c1, c2, v) VALUES (1, 3, 1, 2, null)");
+        execute("INSERT INTO %s (pk1, pk2, c1, c2, v) VALUES (2, 4, 1, 2, 6)");
+        execute("INSERT INTO %s (pk1, pk2, c1, c2, v) VALUES (2, 4, 1, 3, 7)");
+
+        assertRows(execute("SELECT * from %s"),
+                   row(1, 3, 1, 1, 4),
+                   row(1, 3, 1, 2, null),
+                   row(2, 4, 1, 2, 6),
+                   row(2, 4, 1, 3, 7),
+                   row(1, 2, 1, 1, 2),
+                   row(1, 2, 1, 2, 3),
+                   row(1, 1, 1, 1, 1),
+                   row(1, 1, 1, 2, null));
+
+        // IS NOT NULL is a noop on primary key columns so the queries are full scans
+        assertRows(execute("SELECT * from %s WHERE pk1 IS NOT NULL"),
+                   row(1, 3, 1, 1, 4),
+                   row(1, 3, 1, 2, null),
+                   row(2, 4, 1, 2, 6),
+                   row(2, 4, 1, 3, 7),
+                   row(1, 2, 1, 1, 2),
+                   row(1, 2, 1, 2, 3),
+                   row(1, 1, 1, 1, 1),
+                   row(1, 1, 1, 2, null));
+
+        assertRows(execute("SELECT * from %s WHERE pk2 IS NOT NULL"),
+                   row(1, 3, 1, 1, 4),
+                   row(1, 3, 1, 2, null),
+                   row(2, 4, 1, 2, 6),
+                   row(2, 4, 1, 3, 7),
+                   row(1, 2, 1, 1, 2),
+                   row(1, 2, 1, 2, 3),
+                   row(1, 1, 1, 1, 1),
+                   row(1, 1, 1, 2, null));
+
+        assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                             "SELECT * from %s WHERE pk2 IS NOT NULL AND pk2 IN (2, 4)");
+
+        assertRows(execute("SELECT * from %s WHERE pk2 IS NOT NULL AND pk2 IN (2, 4) ALLOW FILTERING"),
+                   row(2, 4, 1, 2, 6),
+                   row(2, 4, 1, 3, 7),
+                   row(1, 2, 1, 1, 2),
+                   row(1, 2, 1, 2, 3));
+
+        assertRows(execute("SELECT * from %s WHERE pk1 = 1 AND pk2 IN (3, 2) AND c1 IS NOT NULL"),
+                   row(1, 2, 1, 1, 2),
+                   row(1, 2, 1, 2, 3),
+                   row(1, 3, 1, 1, 4),
+                   row(1, 3, 1, 2, null));
+
+        assertRows(execute("SELECT * from %s WHERE pk1 = 1 AND pk2 IN (3, 2) AND c2 IS NOT NULL"),
+                   row(1, 2, 1, 1, 2),
+                   row(1, 2, 1, 2, 3),
+                   row(1, 3, 1, 1, 4),
+                   row(1, 3, 1, 2, null));
+
+        assertRows(execute("SELECT * from %s WHERE pk1 = 1 AND pk2 IN (3, 2) AND c1 = 1 AND c2 IS NOT NULL"),
+                   row(1, 2, 1, 1, 2),
+                   row(1, 2, 1, 2, 3),
+                   row(1, 3, 1, 1, 4),
+                   row(1, 3, 1, 2, null));
+
+        assertInvalidMessage("PRIMARY KEY column \"c2\" cannot be restricted as preceding column \"c1\" is not restricted",
+                             "SELECT * from %s WHERE pk1 = 1 AND pk2 IN (3, 2) AND c1 IS NOT NULL AND c2 = 2");
+
+        assertRows(execute("SELECT * from %s WHERE pk1 = 1 AND pk2 IN (3, 2) AND c1 IS NOT NULL AND c2 = 2 ALLOW FILTERING"),
+                   row(1, 2, 1, 2, 3),
+                   row(1, 3, 1, 2, null));
+
+        assertRows(execute("SELECT * from %s WHERE pk1 = 1 AND pk2 IN (3, 2) AND c1 IS NOT NULL AND c1 = 1 AND c2 = 2"),
+                   row(1, 2, 1, 2, 3),
+                   row(1, 3, 1, 2, null));
     }
 }

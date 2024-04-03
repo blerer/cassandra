@@ -547,6 +547,9 @@ public class InsertUpdateIfConditionTest extends CQLTester
                    row(1, 1, 100, null),
                    row(1, 2, 100, null));
 
+        assertRows(execute("UPDATE %s SET s = 200 WHERE a = 1 IF s IS NOT NULL"),
+                   row(false, 100));
+
         assertRows(execute("UPDATE %s SET s = 200 WHERE a = 2 IF s IN (10,20,NULL)"),
                    row(true));
         assertRows(execute("SELECT a, b, s, d FROM %s WHERE a = 2"),

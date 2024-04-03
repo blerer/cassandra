@@ -84,9 +84,9 @@ final class PartitionKeyRestrictions extends RestrictionSetWrapper
                                                          : pkRestrictions.tokenRestrictions;
     }
 
-    public PartitionKeyRestrictions mergeWith(Restriction restriction)
+    public PartitionKeyRestrictions mergeWith(SimpleRestriction restriction)
     {
-        return new PartitionKeyRestrictions(this, (SingleRestriction) restriction);
+        return new PartitionKeyRestrictions(this, restriction);
     }
 
     @Override

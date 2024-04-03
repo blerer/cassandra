@@ -1489,6 +1489,93 @@ public class DeleteTest extends CQLTester
         assertRows(execute("SELECT DISTINCT s1 FROM %s WHERE pk=1"), row((Integer) null));
     }
 
+    @Test
+    public void testDeleteWithIsNotNull() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, c int, s int static, v int, PRIMARY KEY (pk, c))");
+
+        execute("INSERT INTO %s (pk, c, s, v) VALUES (1, 1, 1, 1)");
+        execute("INSERT INTO %s (pk, c, s, v) VALUES (1, 2, 1, 2)");
+        execute("INSERT INTO %s (pk, c, s, v) VALUES (2, 1, 2, 1)");
+        execute("INSERT INTO %s (pk, c, s, v) VALUES (2, 2, 2, 2)");
+        execute("INSERT INTO %s (pk, c, s, v) VALUES (3, 1, 3, 1)");
+        execute("INSERT INTO %s (pk, c, s, v) VALUES (3, 2, 3, 2)");
+        execute("INSERT INTO %s (pk, c, s, v) VALUES (3, 3, 3, 3)");
+        execute("INSERT INTO %s (pk, c, s, v) VALUES (3, 4, 3, 4)");
+
+        assertInvalidMessage("Some partition key parts are missing: pk",
+                             "DELETE FROM %s WHERE pk IS NOT NULL");
+
+        assertRows(execute("SELECT * FROM %s"),
+                   row(1, 1, 1, 1),
+                   row(1, 2, 1, 2),
+                   row(2, 1, 2, 1),
+                   row(2, 2, 2, 2),
+                   row(3, 1, 3, 1),
+                   row(3, 2, 3, 2),
+                   row(3, 3, 3, 3),
+                   row(3, 4, 3, 4));
+
+        execute("DELETE FROM %s WHERE pk IS NOT NULL AND pk = 1");
+
+        assertRows(execute("SELECT * FROM %s"),
+                   row(2, 1, 2, 1),
+                   row(2, 2, 2, 2),
+                   row(3, 1, 3, 1),
+                   row(3, 2, 3, 2),
+                   row(3, 3, 3, 3),
+                   row(3, 4, 3, 4));
+
+        execute("DELETE FROM %s WHERE pk = 2 AND c IS NOT NULL");
+
+        assertRows(execute("SELECT * FROM %s"),
+                   row(3, 1, 3, 1),
+                   row(3, 2, 3, 2),
+                   row(3, 3, 3, 3),
+                   row(3, 4, 3, 4));
+
+        execute("DELETE FROM %s WHERE pk = 3 AND c IS NOT NULL AND c >= 3");
+
+        assertRows(execute("SELECT * FROM %s"),
+                   row(3, 1, 3, 1),
+                   row(3, 2, 3, 2));
+
+        assertInvalidMessage("Non PRIMARY KEY columns found in where clause: v",
+                             "DELETE FROM %s WHERE pk = 3 AND v IS NOT NULL");
+
+        createTable("CREATE TABLE %s (pk1 int, pk2 int, c1 int, c2 int, v int, PRIMARY KEY ((pk1, pk2), c1, c2))");
+
+        execute("INSERT INTO %s (pk1, pk2, c1, c2, v) VALUES (1, 1, 1, 1, 1)");
+        execute("INSERT INTO %s (pk1, pk2, c1, c2, v) VALUES (1, 1, 1, 2, null)");
+        execute("INSERT INTO %s (pk1, pk2, c1, c2, v) VALUES (1, 2, 1, 1, 2)");
+        execute("INSERT INTO %s (pk1, pk2, c1, c2, v) VALUES (1, 2, 1, 2, 3)");
+        execute("INSERT INTO %s (pk1, pk2, c1, c2, v) VALUES (1, 3, 1, 1, 4)");
+        execute("INSERT INTO %s (pk1, pk2, c1, c2, v) VALUES (1, 3, 1, 2, null)");
+        execute("INSERT INTO %s (pk1, pk2, c1, c2, v) VALUES (2, 4, 1, 2, 6)");
+        execute("INSERT INTO %s (pk1, pk2, c1, c2, v) VALUES (2, 4, 1, 3, 7)");
+
+        assertInvalidMessage("Some partition key parts are missing: pk2",
+                             "DELETE FROM %s WHERE pk1 = 1 AND pk2 IS NOT NULL");
+
+        execute("DELETE FROM %s WHERE pk1 = 1 AND pk2 = 2 AND c1 = 1 AND c2 IS NOT NULL");
+
+        assertRows(execute("SELECT * FROM %s"),
+                   row(1, 3, 1, 1, 4),
+                   row(1, 3, 1, 2, null),
+                   row(2, 4, 1, 2, 6),
+                   row(2, 4, 1, 3, 7),
+                   row(1, 1, 1, 1, 1),
+                   row(1, 1, 1, 2, null));
+
+        execute("DELETE FROM %s WHERE pk1 = 1 AND pk2 = 3 AND c1 IS NOT NULL");
+
+        assertRows(execute("SELECT * FROM %s"),
+                   row(2, 4, 1, 2, 6),
+                   row(2, 4, 1, 3, 7),
+                   row(1, 1, 1, 1, 1),
+                   row(1, 1, 1, 2, null));
+    }
+
     /**
      * Checks if the memtable is empty or not
      * @return {@code true} if the memtable is empty, {@code false} otherwise.
