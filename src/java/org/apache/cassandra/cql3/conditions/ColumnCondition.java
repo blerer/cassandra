@@ -121,6 +121,7 @@ public abstract class ColumnCondition
             super(column, op, values);
         }
 
+        @Override
         public Bound bind(QueryOptions options)
         {
             if (column.type.isCollection() && column.type.isMultiCell())
@@ -146,18 +147,21 @@ public abstract class ColumnCondition
             this.collectionElement = collectionElement;
         }
 
+        @Override
         public void addFunctionsTo(List<Function> functions)
         {
             collectionElement.addFunctionsTo(functions);
             super.addFunctionsTo(functions);
         }
 
+        @Override
         public void collectMarkerSpecification(VariableSpecifications boundNames)
         {
             collectionElement.collectMarkerSpecification(boundNames);
             super.collectMarkerSpecification(boundNames);
         }
 
+        @Override
         public Bound bind(QueryOptions options)
         {
             return new ElementAccessBound(column, collectionElement.bindAndGet(options), operator, bindAndGetTerms(options));
@@ -178,6 +182,7 @@ public abstract class ColumnCondition
             this.udtField = udtField;
         }
 
+        @Override
         public Bound bind(QueryOptions options)
         {
             return new UDTFieldAccessBound(column, udtField, operator, bindAndGetTerms(options));
@@ -724,8 +729,8 @@ public abstract class ColumnCondition
 
     public static class Raw
     {
-        private final Term.Raw value;
-        private final Terms.Raw inValues;
+        private final ColumnIdentifier column;
+        private final Terms.Raw values;
 
         // Can be null, only used with the syntax "IF m[e] = ..." (in which case it's 'e')
         private final Term.Raw collectionElement;
@@ -735,54 +740,49 @@ public abstract class ColumnCondition
 
         private final Operator operator;
 
-        private Raw(Term.Raw value, Terms.Raw inValues, Term.Raw collectionElement,
-                    FieldIdentifier udtField, Operator op)
+        private Raw(ColumnIdentifier column, Term.Raw collectionElement, FieldIdentifier udtField, Operator op, Terms.Raw values)
         {
-            this.value = value;
-            this.inValues = inValues;
+            this.column = column;
+            this.values = values;
             this.collectionElement = collectionElement;
             this.udtField = udtField;
             this.operator = op;
         }
 
-        /** A condition on a column. For example: "IF col = 'foo'" */
-        public static Raw simpleCondition(Term.Raw value, Operator op)
+        /**
+         * Create condition on a column. For example: "IF col = 'foo'" or "IF col IN ('foo', 'bar', ...)"
+         */
+        public static Raw simpleCondition(ColumnIdentifier column, Operator op, Terms.Raw values)
         {
-            return new Raw(value, null, null, null,  op);
+            return new Raw(column, null, null, op, values);
         }
 
-        /** An IN condition on a column. For example: "IF col IN ('foo', 'bar', ...)" */
-        public static Raw simpleInCondition(Terms.Raw inValues)
+        /**
+         * Create a condition on a collection element. For example: "IF col['key'] = 'foo'"
+         */
+        public static Raw collectionCondition(ColumnIdentifier column, Term.Raw collectionElement, Operator op, Terms.Raw values)
         {
-            return new Raw(null, inValues, null, null, Operator.IN);
+            return new Raw(column, collectionElement, null, op, values);
         }
 
-        /** A condition on a collection element. For example: "IF col['key'] = 'foo'" */
-        public static Raw collectionCondition(Term.Raw value, Term.Raw collectionElement, Operator op)
+        /**
+         * Create a condition on a UDT field. For example: "IF col.field = 'foo'"
+         */
+        public static Raw udtFieldCondition(ColumnIdentifier column, FieldIdentifier udtField, Operator op, Terms.Raw values)
         {
-            return new Raw(value, null, collectionElement, null, op);
+            return new Raw(column, null, udtField, op, values);
         }
 
-        /** An IN condition on a collection element. For example: "IF col['key'] IN ('foo', 'bar', ...)" */
-        public static Raw collectionInCondition(Term.Raw collectionElement, Terms.Raw inValues)
+        public ColumnIdentifier column()
         {
-            return new Raw(null, inValues, collectionElement, null, Operator.IN);
+            return column;
         }
 
-        /** A condition on a UDT field. For example: "IF col.field = 'foo'" */
-        public static Raw udtFieldCondition(Term.Raw value, FieldIdentifier udtField, Operator op)
+        public ColumnCondition prepare(TableMetadata table)
         {
-            return new Raw(value, null, null, udtField, op);
-        }
+            ColumnMetadata receiver = table.getExistingColumn(column);
+            checkFalse(receiver.isPrimaryKeyColumn(), "PRIMARY KEY column '%s' cannot have IF conditions", receiver.name);
 
-        /** An IN condition on a collection element. For example: "IF col.field IN ('foo', 'bar', ...)" */
-        public static Raw udtFieldInCondition(FieldIdentifier udtField, Terms.Raw inValues)
-        {
-            return new Raw(null, inValues, null, udtField, Operator.IN);
-        }
-
-        public ColumnCondition prepare(String keyspace, ColumnMetadata receiver, TableMetadata cfm)
-        {
             if (receiver.type instanceof CounterColumnType)
                 throw invalidRequest("Conditions on counters are not supported");
 
@@ -809,7 +809,7 @@ public abstract class ColumnCondition
                 }
 
                 validateOperationOnDurations(valueSpec.type);
-                return condition(receiver, collectionElement.prepare(keyspace, elementSpec), operator, prepareTerms(keyspace, valueSpec));
+                return condition(receiver, collectionElement.prepare(table.keyspace, elementSpec), operator, prepareTerms(table.keyspace, valueSpec));
             }
 
             if (udtField != null)
@@ -821,11 +821,11 @@ public abstract class ColumnCondition
 
                 ColumnSpecification fieldReceiver = UserTypes.fieldSpecOf(receiver, fieldPosition);
                 validateOperationOnDurations(fieldReceiver.type);
-                return condition(receiver, udtField, operator, prepareTerms(keyspace, fieldReceiver));
+                return condition(receiver, udtField, operator, prepareTerms(table.keyspace, fieldReceiver));
             }
 
             validateOperationOnDurations(receiver.type);
-            return condition(receiver, operator, prepareTerms(keyspace, receiver));
+            return condition(receiver, operator, prepareTerms(table.keyspace, receiver));
         }
 
         private Terms prepareTerms(String keyspace, ColumnSpecification receiver)
@@ -835,15 +835,11 @@ public abstract class ColumnCondition
             checkFalse(operator == Operator.CONTAINS && !(receiver.type.isCollection()),
                        "Cannot use CONTAINS on non-collection column %s", receiver.name);
 
-            if (operator.isIN())
-            {
-                return inValues.prepare(keyspace, receiver);
-            }
 
             if (operator == Operator.CONTAINS || operator == Operator.CONTAINS_KEY)
                 receiver = ((CollectionType<?>) receiver.type).makeCollectionReceiver(receiver, operator == Operator.CONTAINS_KEY);
 
-            return Terms.of(value.prepare(keyspace, receiver));
+            return values.prepare(keyspace, receiver);
         }
 
         private void validateOperationOnDurations(AbstractType<?> type)
@@ -857,9 +853,9 @@ public abstract class ColumnCondition
             }
         }
 
-        public Term.Raw getValue()
+        public boolean containsBindMarkers()
         {
-            return value;
+            return values.containsBindMarkers() || (collectionElement != null && collectionElement.containsBindMarkers());
         }
 
         @Override

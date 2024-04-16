@@ -175,6 +175,7 @@ public enum Operator
         {
             return kind != ColumnsExpression.Kind.MAP_ELEMENT;
         }
+
     },
     GTE(1)
     {
