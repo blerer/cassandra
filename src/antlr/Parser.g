@@ -1725,8 +1725,8 @@ columnCondition returns [ColumnCondition.Raw condition]
         | op=containsOperator t=term   { $condition = ColumnCondition.Raw.simpleCondition(column, op, Terms.Raw.of(t)); }
         | K_IN v=singleColumnInValues  { $condition = ColumnCondition.Raw.simpleCondition(column, Operator.IN, v); }
         | '[' element=term ']'
-            ( op=relationType t=term      { $condition = ColumnCondition.Raw.collectionCondition(column, element, op, Terms.Raw.of(t)); }
-            | K_IN v=singleColumnInValues { $condition = ColumnCondition.Raw.collectionCondition(column, element, Operator.IN, v); }
+            ( op=relationType t=term      { $condition = ColumnCondition.Raw.collectionElementCondition(column, element, op, Terms.Raw.of(t)); }
+            | K_IN v=singleColumnInValues { $condition = ColumnCondition.Raw.collectionElementCondition(column, element, Operator.IN, v); }
             )
         | '.' field=fident
             ( op=relationType t=term      { $condition = ColumnCondition.Raw.udtFieldCondition(column, field, op, Terms.Raw.of(t)); }

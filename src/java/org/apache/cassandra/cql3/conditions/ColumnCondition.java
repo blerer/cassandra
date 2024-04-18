@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.conditions;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterators;
 
 import org.apache.cassandra.cql3.*;
@@ -44,17 +45,26 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.*;
 /**
  * A CQL3 condition on the value of a column or collection element.  For example, "UPDATE .. IF a = 0".
  */
-public abstract class ColumnCondition
+public final class ColumnCondition
 {
-    public final ColumnMetadata column;
+    /**
+     * The columns expression to which the condition applies.
+     */
+    public final ColumnsExpression columnsExpression;
+    /**
+     * The operator
+     */
     public final Operator operator;
-    private final Terms terms;
+    /**
+     * The values
+     */
+    private final Terms values;
 
-    private ColumnCondition(ColumnMetadata column, Operator op, Terms terms)
+    private ColumnCondition(ColumnsExpression columnsExpression, Operator operator, Terms values)
     {
-        this.column = column;
-        this.operator = op;
-        this.terms = terms;
+        this.columnsExpression = columnsExpression;
+        this.operator = operator;
+        this.values = values;
     }
 
     /**
@@ -64,7 +74,8 @@ public abstract class ColumnCondition
      */
     public void addFunctionsTo(List<Function> functions)
     {
-        terms.addFunctionsTo(functions);
+        columnsExpression.addFunctionsTo(functions);
+        values.addFunctionsTo(functions);
     }
 
     /**
@@ -75,22 +86,66 @@ public abstract class ColumnCondition
      */
     public void collectMarkerSpecification(VariableSpecifications boundNames)
     {
-        terms.collectMarkerSpecification(boundNames);
+        columnsExpression.collectMarkerSpecification(boundNames);
+        values.collectMarkerSpecification(boundNames);
     }
 
-    public abstract ColumnCondition.Bound bind(QueryOptions options);
-
-    protected final List<ByteBuffer> bindAndGetTerms(QueryOptions options)
+    public ColumnCondition.Bound bind(QueryOptions options)
     {
-        List<ByteBuffer> buffers = terms.bindAndGet(options);
+        switch (columnsExpression.kind())
+        {
+            case SINGLE_COLUMN:
+                return bindSingleColumn(options);
+            case COLLECTION_ELEMENT:
+                return bindCollectionElement(options);
+            case UDT_FIELD:
+                return bindUdtField(options);
+            default:
+                throw new UnsupportedOperationException();
+        }
+    }
+
+    private Bound bindSingleColumn(QueryOptions options)
+    {
+        ColumnMetadata column = columnsExpression.firstColumn();
+        if (column.type.isCollection() && column.type.isMultiCell())
+            return new MultiCellCollectionBound(column, operator, bindTerms(options));
+
+        if (column.type.isUDT() && column.type.isMultiCell())
+            return new MultiCellUdtBound(column, operator, bindAndGetTerms(options), options.getProtocolVersion());
+
+        return new SimpleBound(column, operator, bindAndGetTerms(options));
+    }
+
+    private Bound bindCollectionElement(QueryOptions options)
+    {
+        ColumnMetadata column = columnsExpression.firstColumn();
+        ByteBuffer element = bindAndGetCollectionElement(options);
+        return new ElementAccessBound(column, element, operator, bindAndGetTerms(options));
+    }
+
+    private Bound bindUdtField(QueryOptions options)
+    {
+        ColumnMetadata column = columnsExpression.firstColumn();
+        return new UDTFieldAccessBound(column, columnsExpression.udtField(), operator, bindAndGetTerms(options));
+    }
+
+    private List<ByteBuffer> bindAndGetTerms(QueryOptions options)
+    {
+        List<ByteBuffer> buffers = values.bindAndGet(options);
         checkFalse(buffers == null && operator.isIN(), "Invalid null list in IN condition");
         checkFalse(buffers == Term.UNSET_LIST, "Invalid 'unset' value in condition");
         return filterUnsetValuesIfNeeded(buffers, ByteBufferUtil.UNSET_BYTE_BUFFER);
     }
 
-    protected final Terms.Terminals bindTerms(QueryOptions options)
+    private ByteBuffer bindAndGetCollectionElement(QueryOptions options)
     {
-        Terms.Terminals terminals = terms.bind(options);
+        return columnsExpression.collectionElement().bindAndGet(options);
+    }
+
+    private Terms.Terminals bindTerms(QueryOptions options)
+    {
+        Terms.Terminals terminals = values.bind(options);
         checkFalse(terminals == null, "Invalid null list in IN condition");
         checkFalse(terminals == Terms.UNSET_TERMINALS, "Invalid 'unset' value in condition");
         return Terms.Terminals.of(filterUnsetValuesIfNeeded(terminals.asList(), Constants.UNSET_VALUE));
@@ -112,106 +167,35 @@ public abstract class ColumnCondition
     }
 
     /**
-     * Simple condition (e.g. <pre>IF v = 1</pre>).
-     */
-    private static final class SimpleColumnCondition extends ColumnCondition
-    {
-        public SimpleColumnCondition(ColumnMetadata column, Operator op, Terms values)
-        {
-            super(column, op, values);
-        }
-
-        @Override
-        public Bound bind(QueryOptions options)
-        {
-            if (column.type.isCollection() && column.type.isMultiCell())
-                return new MultiCellCollectionBound(column, operator, bindTerms(options));
-
-            if (column.type.isUDT() && column.type.isMultiCell())
-                return new MultiCellUdtBound(column, operator, bindAndGetTerms(options), options.getProtocolVersion());
-
-            return new SimpleBound(column, operator, bindAndGetTerms(options));
-        }
-    }
-
-    /**
-     * A condition on a collection element (e.g. <pre>IF l[1] = 1</pre>).
-     */
-    private static class CollectionElementCondition extends ColumnCondition
-    {
-        private final Term collectionElement;
-
-        public CollectionElementCondition(ColumnMetadata column, Term collectionElement, Operator op, Terms values)
-        {
-            super(column, op, values);
-            this.collectionElement = collectionElement;
-        }
-
-        @Override
-        public void addFunctionsTo(List<Function> functions)
-        {
-            collectionElement.addFunctionsTo(functions);
-            super.addFunctionsTo(functions);
-        }
-
-        @Override
-        public void collectMarkerSpecification(VariableSpecifications boundNames)
-        {
-            collectionElement.collectMarkerSpecification(boundNames);
-            super.collectMarkerSpecification(boundNames);
-        }
-
-        @Override
-        public Bound bind(QueryOptions options)
-        {
-            return new ElementAccessBound(column, collectionElement.bindAndGet(options), operator, bindAndGetTerms(options));
-        }
-    }
-
-    /**
-     *  A condition on a UDT field (e.g. <pre>IF v.a = 1</pre>).
-     */
-    private final static class UDTFieldCondition extends ColumnCondition
-    {
-        private final FieldIdentifier udtField;
-
-        public UDTFieldCondition(ColumnMetadata column, FieldIdentifier udtField, Operator op, Terms values)
-        {
-            super(column, op, values);
-            assert udtField != null;
-            this.udtField = udtField;
-        }
-
-        @Override
-        public Bound bind(QueryOptions options)
-        {
-            return new UDTFieldAccessBound(column, udtField, operator, bindAndGetTerms(options));
-        }
-    }
-
-    /**
      *  A regular column, simple condition.
      */
-    public static ColumnCondition condition(ColumnMetadata column, Operator op, Terms terms)
+    public static ColumnCondition simpleColumnCondition(ColumnsExpression column, Operator op, Terms terms)
     {
-        return new SimpleColumnCondition(column, op, terms);
+        assert column.udtField() == null && column.collectionElement() == null && column.mapKey() == null;
+
+        return new ColumnCondition(column, op, terms);
     }
 
     /**
      * A collection column, simple condition.
      */
-    public static ColumnCondition condition(ColumnMetadata column, Term collectionElement, Operator op, Terms terms)
+    public static ColumnCondition collectionColumnCondition(ColumnsExpression column, Operator op, Terms terms)
     {
-        return new CollectionElementCondition(column, collectionElement, op, terms);
+        assert column.collectionElement() != null;
+
+        return new ColumnCondition(column, op, terms);
     }
 
     /**
      * A UDT column, simple condition.
      */
-    public static ColumnCondition condition(ColumnMetadata column, FieldIdentifier udtField, Operator op, Terms terms)
+    public static ColumnCondition udtFieldCondition(ColumnsExpression column, Operator op, Terms terms)
     {
-        return new UDTFieldCondition(column, udtField, op, terms);
+        assert column.udtField() != null;
+
+        return new ColumnCondition(column, op, terms);
     }
+
 
     public static abstract class Bound
     {
@@ -262,32 +246,32 @@ public abstract class ColumnCondition
         }
     }
 
-    protected static Cell<?> getCell(Row row, ColumnMetadata column)
+    private static Cell<?> getCell(Row row, ColumnMetadata column)
     {
-        // If we're asking for a given cell, and we didn't got any row from our read, it's
+        // If we're asking for a given cell, and we didn't get any row from our read, it's
         // the same as not having said cell.
         return row == null ? null : row.getCell(column);
     }
 
-    protected static Cell<?> getCell(Row row, ColumnMetadata column, CellPath path)
+    private static Cell<?> getCell(Row row, ColumnMetadata column, CellPath path)
     {
-        // If we're asking for a given cell, and we didn't got any row from our read, it's
+        // If we're asking for a given cell, and we didn't get any row from our read, it's
         // the same as not having said cell.
         return row == null ? null : row.getCell(column, path);
     }
 
-    protected static Iterator<Cell<?>> getCells(Row row, ColumnMetadata column)
+    private static Iterator<Cell<?>> getCells(Row row, ColumnMetadata column)
     {
-        // If we're asking for a complex cells, and we didn't got any row from our read, it's
+        // If we're asking for complex cells, and we didn't get any row from our read, it's
         // the same as not having any cells for that column.
         if (row == null)
             return Collections.emptyIterator();
 
         ComplexColumnData complexData = row.getComplexColumnData(column);
-        return complexData == null ? Collections.<Cell<?>>emptyIterator() : complexData.iterator();
+        return complexData == null ? Collections.emptyIterator() : complexData.iterator();
     }
 
-    protected static boolean evaluateComparisonWithOperator(int comparison, Operator operator)
+    private static boolean evaluateComparisonWithOperator(int comparison, Operator operator)
     {
         // called when comparison != 0
         switch (operator)
@@ -520,7 +504,7 @@ public abstract class ColumnCondition
                 if (!conditionIter.hasNext())
                     return (operator == Operator.GT) || (operator == Operator.GTE) || (operator == Operator.NEQ);
 
-                // for lists we use the cell value; for sets we use the cell name
+                // for lists, we use the cell value; for sets we use the cell name
                 ByteBuffer cellValue = isSet ? iter.next().path().get(0) : iter.next().buffer();
                 int comparison = type.compare(cellValue, conditionIter.next());
                 if (comparison != 0)
@@ -541,7 +525,7 @@ public abstract class ColumnCondition
 
         private static boolean setAppliesTo(SetType<?> type, Iterator<Cell<?>> iter, List<ByteBuffer> elements, Operator operator)
         {
-            // The elements are alread sorted as expected by the SetType
+            // The elements are already sorted as expected by the SetType
             return setOrListAppliesTo(type.getElementsType(), iter, elements.iterator(), operator, true);
         }
 
@@ -703,7 +687,7 @@ public abstract class ColumnCondition
             return isSatisfiedBy(rowValue(row));
         }
 
-        private final ByteBuffer rowValue(Row row)
+        private ByteBuffer rowValue(Row row)
         {
             UserType userType = (UserType) column.type;
             Iterator<Cell<?>> iter = getCells(row, column);
@@ -729,7 +713,7 @@ public abstract class ColumnCondition
 
     public static class Raw
     {
-        private final ColumnIdentifier column;
+        private final ColumnsExpression.Raw rawExpressions;
         private final Terms.Raw values;
 
         // Can be null, only used with the syntax "IF m[e] = ..." (in which case it's 'e')
@@ -740,9 +724,9 @@ public abstract class ColumnCondition
 
         private final Operator operator;
 
-        private Raw(ColumnIdentifier column, Term.Raw collectionElement, FieldIdentifier udtField, Operator op, Terms.Raw values)
+        private Raw(ColumnsExpression.Raw columnExpressions, Term.Raw collectionElement, FieldIdentifier udtField, Operator op, Terms.Raw values)
         {
-            this.column = column;
+            this.rawExpressions = columnExpressions;
             this.values = values;
             this.collectionElement = collectionElement;
             this.udtField = udtField;
@@ -754,15 +738,15 @@ public abstract class ColumnCondition
          */
         public static Raw simpleCondition(ColumnIdentifier column, Operator op, Terms.Raw values)
         {
-            return new Raw(column, null, null, op, values);
+            return new Raw(ColumnsExpression.Raw.singleColumn(column), null, null, op, values);
         }
 
         /**
          * Create a condition on a collection element. For example: "IF col['key'] = 'foo'"
          */
-        public static Raw collectionCondition(ColumnIdentifier column, Term.Raw collectionElement, Operator op, Terms.Raw values)
+        public static Raw collectionElementCondition(ColumnIdentifier column, Term.Raw collectionElement, Operator op, Terms.Raw values)
         {
-            return new Raw(column, collectionElement, null, op, values);
+            return new Raw(ColumnsExpression.Raw.collectionElement(column, collectionElement), collectionElement, null, op, values);
         }
 
         /**
@@ -770,62 +754,61 @@ public abstract class ColumnCondition
          */
         public static Raw udtFieldCondition(ColumnIdentifier column, FieldIdentifier udtField, Operator op, Terms.Raw values)
         {
-            return new Raw(column, null, udtField, op, values);
+            return new Raw(ColumnsExpression.Raw.udtField(column, udtField), null, udtField, op, values);
         }
 
         public ColumnIdentifier column()
         {
-            return column;
+            return rawExpressions.identifiers().get(0);
         }
 
         public ColumnCondition prepare(TableMetadata table)
         {
-            ColumnMetadata receiver = table.getExistingColumn(column);
+            ColumnsExpression expression = rawExpressions.prepare(table);
+
+            ColumnMetadata receiver = table.getExistingColumn(column());
             checkFalse(receiver.isPrimaryKeyColumn(), "PRIMARY KEY column '%s' cannot have IF conditions", receiver.name);
 
             if (receiver.type instanceof CounterColumnType)
                 throw invalidRequest("Conditions on counters are not supported");
 
-            if (collectionElement != null)
+            switch (expression.kind())
             {
-                if (!(receiver.type.isCollection()))
-                    throw invalidRequest("Invalid element access syntax for non-collection column %s", receiver.name);
+                case COLLECTION_ELEMENT:
+                    if (!(receiver.type.isCollection()))
+                        throw invalidRequest("Invalid element access syntax for non-collection column %s", receiver.name);
 
-                ColumnSpecification elementSpec, valueSpec;
-                switch ((((CollectionType<?>) receiver.type).kind))
-                {
-                    case LIST:
-                        elementSpec = Lists.indexSpecOf(receiver);
-                        valueSpec = Lists.valueSpecOf(receiver);
-                        break;
-                    case MAP:
-                        elementSpec = Maps.keySpecOf(receiver);
-                        valueSpec = Maps.valueSpecOf(receiver);
-                        break;
-                    case SET:
-                        throw invalidRequest("Invalid element access syntax for set column %s", receiver.name);
-                    default:
-                        throw new AssertionError();
-                }
+                    ColumnSpecification valueSpec;
+                    switch ((((CollectionType<?>) receiver.type).kind))
+                    {
+                        case LIST:
+                            valueSpec = Lists.valueSpecOf(receiver);
+                            break;
+                        case MAP:
+                            valueSpec = Maps.valueSpecOf(receiver);
+                            break;
+                        case SET:
+                            throw invalidRequest("Invalid element access syntax for set column %s", receiver.name);
+                        default:
+                            throw new AssertionError();
+                    }
 
-                validateOperationOnDurations(valueSpec.type);
-                return condition(receiver, collectionElement.prepare(table.keyspace, elementSpec), operator, prepareTerms(table.keyspace, valueSpec));
-            }
+                    validateOperationOnDurations(valueSpec.type);
+                    return collectionColumnCondition(expression, operator, prepareTerms(table.keyspace, valueSpec));
 
-            if (udtField != null)
-            {
-                UserType userType = (UserType) receiver.type;
-                int fieldPosition = userType.fieldPosition(udtField);
-                if (fieldPosition == -1)
-                    throw invalidRequest("Unknown field %s for column %s", udtField, receiver.name);
+                case UDT_FIELD:
+                    UserType userType = (UserType) receiver.type;
+                    int fieldPosition = userType.fieldPosition(udtField);
+                    if (fieldPosition == -1)
+                        throw invalidRequest("Unknown field %s for column %s", udtField, receiver.name);
 
-                ColumnSpecification fieldReceiver = UserTypes.fieldSpecOf(receiver, fieldPosition);
-                validateOperationOnDurations(fieldReceiver.type);
-                return condition(receiver, udtField, operator, prepareTerms(table.keyspace, fieldReceiver));
+                    ColumnSpecification fieldReceiver = UserTypes.fieldSpecOf(receiver, fieldPosition);
+                    validateOperationOnDurations(fieldReceiver.type);
+                    return ColumnCondition.udtFieldCondition(expression, operator, prepareTerms(table.keyspace, fieldReceiver));
             }
 
             validateOperationOnDurations(receiver.type);
-            return condition(receiver, operator, prepareTerms(table.keyspace, receiver));
+            return simpleColumnCondition(expression, operator, prepareTerms(table.keyspace, receiver));
         }
 
         private Terms prepareTerms(String keyspace, ColumnSpecification receiver)
@@ -856,6 +839,12 @@ public abstract class ColumnCondition
         public boolean containsBindMarkers()
         {
             return values.containsBindMarkers() || (collectionElement != null && collectionElement.containsBindMarkers());
+        }
+
+        @VisibleForTesting
+        public String toCQLString()
+        {
+            return String.format("%s %s %s", rawExpressions.toCQLString(), operator, values.getText());
         }
 
         @Override

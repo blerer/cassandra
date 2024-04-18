@@ -386,7 +386,7 @@ public class CQL3CasRequest implements CASRequest
             for (ColumnCondition condition : conds)
             {
                 ColumnCondition.Bound current = condition.bind(options);
-                conditions.put(Pair.create(condition.column.name, current.getCollectionElementValue()), current);
+                conditions.put(Pair.create(condition.columnsExpression.firstColumn().name, current.getCollectionElementValue()), current);
             }
         }
 
