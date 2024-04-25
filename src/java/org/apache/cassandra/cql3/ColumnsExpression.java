@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -40,6 +41,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.EnumComparator;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkContainsNoDuplicates;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkContainsOnly;
@@ -52,40 +54,64 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.invalidReq
  *
  * <p>This class can be modified to add support for more column expressions like UDT fields, List elements,
  * functions on columns... </p>
+ *
+ * <p>{@code ColumnExpressions} implements {@code Comparable} based on the columns kind, positions and expression {@code Kind}.
+ * This is done to ensure proper ordering of the {@code SimpleRestrictions} in the query tree.</p>
+ * @see org.apache.cassandra.cql3.restrictions.SimpleRestriction
  */
-public final class ColumnsExpression
+public final class ColumnsExpression implements Comparable<ColumnsExpression>
 {
     /**
-     * Represent the expression kind
+     * Comparator to compare column kinds.
+     */
+    private static final Comparator<ColumnMetadata.Kind> COLUMN_KIND_COMPARATOR = new EnumComparator<>(ColumnMetadata.Kind.PARTITION_KEY,
+                                                                                                       ColumnMetadata.Kind.CLUSTERING,
+                                                                                                       ColumnMetadata.Kind.STATIC,
+                                                                                                       ColumnMetadata.Kind.REGULAR);
+    /**
+     * Represent the expression kind.
      */
     public enum Kind
     {
         /**
-         * Single column expression (e.g. {@code columnA})
+         * Token expression (e.g. {@code token(columnA, columnB)})
          */
-        SINGLE_COLUMN
+        TOKEN
         {
             @Override
-            void validateColumns(TableMetadata table, List<ColumnMetadata> columns)
+            protected void validateColumns(TableMetadata table, List<ColumnMetadata> columns)
             {
+                if (columns.equals(table.partitionKeyColumns()))
+                    return;
+
+                // If the columns do not match the partition key columns, let's try to narrow down the problem
+                checkTrue(new HashSet<>(columns).containsAll(table.partitionKeyColumns()),
+                          "The token() function must be applied to all partition key components or none of them");
+
+                checkContainsNoDuplicates(columns, "The token() function contains duplicate partition key components");
+
+                checkContainsOnly(columns, table.partitionKeyColumns(), "The token() function must contains only partition key components");
+
+                throw invalidRequest("The token function arguments must be in the partition key order: %s",
+                                     Joiner.on(", ").join(ColumnMetadata.toIdentifiers(table.partitionKeyColumns())));
             }
 
             @Override
             AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns)
             {
-                return columns.get(0).type;
+                return table.partitioner.getTokenValidator();
             }
 
             @Override
             String toCQLString(Stream<String> columns, String mapKey)
             {
-                return columns.findFirst().orElseThrow();
+                return columns.collect(Collectors.joining(", ", "token(", ")"));
             }
 
             @Override
             public String toString()
             {
-                return "single column";
+                return "token";
             }
         },
         /**
@@ -130,44 +156,31 @@ public final class ColumnsExpression
             }
         },
         /**
-         * Token expression (e.g. {@code token(columnA, columnB)})
+         * Single column expression (e.g. {@code columnA})
          */
-        TOKEN
+        SINGLE_COLUMN
         {
             @Override
-            protected void validateColumns(TableMetadata table, List<ColumnMetadata> columns)
+            void validateColumns(TableMetadata table, List<ColumnMetadata> columns)
             {
-                if (columns.equals(table.partitionKeyColumns()))
-                    return;
-
-                // If the columns do not match the partition key columns, let's try to narrow down the problem
-                checkTrue(new HashSet<>(columns).containsAll(table.partitionKeyColumns()),
-                          "The token() function must be applied to all partition key components or none of them");
-
-                checkContainsNoDuplicates(columns, "The token() function contains duplicate partition key components");
-
-                checkContainsOnly(columns, table.partitionKeyColumns(), "The token() function must contains only partition key components");
-
-                throw invalidRequest("The token function arguments must be in the partition key order: %s",
-                                     Joiner.on(", ").join(ColumnMetadata.toIdentifiers(table.partitionKeyColumns())));
             }
 
             @Override
             AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns)
             {
-                return table.partitioner.getTokenValidator();
+                return columns.get(0).type;
             }
 
             @Override
             String toCQLString(Stream<String> columns, String mapKey)
             {
-                return columns.collect(Collectors.joining(", ", "token(", ")"));
+                return columns.findFirst().orElseThrow();
             }
 
             @Override
             public String toString()
             {
-                return "token";
+                return "single column";
             }
         },
         /**
@@ -392,6 +405,49 @@ public final class ColumnsExpression
     {
         if (mapKey != null)
             mapKey.addFunctionsTo(functions);
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        ColumnsExpression that = (ColumnsExpression) o;
+        return kind == that.kind
+               && Objects.equals(columns, that.columns)
+               && Objects.equals(mapKey, that.mapKey);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return Objects.hash(kind, columns, mapKey);
+    }
+
+    @Override
+    public int compareTo(ColumnsExpression that)
+    {
+        // We want the restrictions to be sorted first by the type of columns to which they apply as those determine
+        // the access type
+        int columnKindDiff = COLUMN_KIND_COMPARATOR.compare(columnsKind(), that.columnsKind());
+        if (columnKindDiff != 0)
+            return columnKindDiff;
+
+        ColumnMetadata thisColumn = firstColumn();
+        ColumnMetadata thatColumn = that.firstColumn();
+
+        if (thisColumn != thatColumn)
+        {
+            // We then need to look at the position as we need those columns in order for the primary key elements
+            int positionDiff = Integer.compare(thisColumn.position(), thatColumn.position());
+            if (positionDiff != 0)
+                return positionDiff;
+
+            // Not some primary key. The ordering should be based on column name like for TableMetadata
+            return thisColumn.name.bytes.compareTo(thatColumn.name.bytes);
+        }
+
+        return kind.compareTo(that.kind);
     }
 
     /**

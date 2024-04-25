@@ -22,6 +22,7 @@ import java.io.DataOutput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -39,6 +40,7 @@ import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.ListSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.EnumComparator;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
@@ -513,6 +515,15 @@ public enum Operator
             return true;
         }
     };
+    /////////////////////////////////////////////////////////////////////////////////
+    // WARNING: Do not forget to add new enum to the comparator bellow
+    ////////////////////////////////////////////////////////////////////////////////
+    /**
+     * Comparator use to control the ordering of Operators independently of the enum definition.
+     */
+    public static final Comparator<Operator> COMPARATOR =
+        new EnumComparator<>(EQ, NEQ, IN, GT, GTE, LTE, LT, IS_NOT, CONTAINS, CONTAINS_KEY, LIKE, LIKE_PREFIX,
+                             LIKE_SUFFIX, LIKE_CONTAINS, LIKE_MATCHES, ANN);
 
     /**
      * The binary representation of this <code>Enum</code> value.

@@ -19,10 +19,12 @@
 package org.apache.cassandra.cql3.restrictions;
 
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import java.util.SortedSet;
 
-import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.RangeSet;
 
 import org.apache.cassandra.cql3.Operator;
@@ -51,7 +53,7 @@ public final class MergedRestriction implements SingleRestriction
     /**
      * The restrictions composing this restriction
      */
-    private final List<SimpleRestriction> restrictions;
+    private final SortedSet<SimpleRestriction> restrictions;
 
     private final boolean isOnToken;
 
@@ -73,7 +75,7 @@ public final class MergedRestriction implements SingleRestriction
                      ? other.columns()
                      : restriction.columns();
 
-        ImmutableList.Builder<SimpleRestriction> builder = ImmutableList.builder();
+        ImmutableSortedSet.Builder<SimpleRestriction> builder = ImmutableSortedSet.naturalOrder();
         int containsCount = 0;
         if (restriction instanceof MergedRestriction)
         {
@@ -258,18 +260,18 @@ public final class MergedRestriction implements SingleRestriction
     @Override
     public void addFunctionsTo(List<Function> functions)
     {
-        for (int i = 0, m = restrictions.size(); i < m; i++)
+        for (SimpleRestriction restriction : restrictions)
         {
-            restrictions.get(i).addFunctionsTo(functions);
+            restriction.addFunctionsTo(functions);
         }
     }
 
     @Override
     public boolean needsFilteringOrIndexing()
     {
-        for (int i = 0, m = restrictions.size(); i < m; i++)
+        for (SimpleRestriction restriction : restrictions)
         {
-            if (restrictions.get(i).needsFilteringOrIndexing())
+            if (restriction.needsFilteringOrIndexing())
                 return true;
         }
         return false;
@@ -293,9 +295,9 @@ public final class MergedRestriction implements SingleRestriction
     @Override
     public Index findSupportingIndex(Iterable<Index> indexes)
     {
-        for (int i = 0, m = restrictions.size(); i < m; i++)
+        for (SimpleRestriction restriction : restrictions)
         {
-            Index index = restrictions.get(i).findSupportingIndex(indexes);
+            Index index = restriction.findSupportingIndex(indexes);
             if (index != null)
                 return index;
         }
@@ -316,10 +318,11 @@ public final class MergedRestriction implements SingleRestriction
     @Override
     public List<ClusteringElements> values(QueryOptions options)
     {
-        List<ClusteringElements> values = restrictions.get(0).values(options);
-        for (int i = 1, m = restrictions.size(); i < m; i++)
+        Iterator<SimpleRestriction> iter = restrictions.iterator();
+        List<ClusteringElements> values = iter.next().values(options);
+        while (iter.hasNext())
         {
-            values.retainAll(restrictions.get(i).values(options));
+            values.retainAll(iter.next().values(options));
         }
         return values;
     }
@@ -327,9 +330,9 @@ public final class MergedRestriction implements SingleRestriction
     @Override
     public RangeSet<ClusteringElements> restrict(RangeSet<ClusteringElements> rangeSet, QueryOptions options)
     {
-        for (int i = 0, m = restrictions.size(); i < m; i++)
+        for (SimpleRestriction restriction : restrictions)
         {
-            restrictions.get(i).restrict(rangeSet, options);
+            restriction.restrict(rangeSet, options);
         }
         return rangeSet;
     }
@@ -337,9 +340,9 @@ public final class MergedRestriction implements SingleRestriction
     @Override
     public void addToRowFilter(RowFilter filter, IndexRegistry indexRegistry, QueryOptions options)
     {
-        for (int i = 0, m = restrictions.size(); i < m; i++)
+        for (SimpleRestriction restriction : restrictions)
         {
-            restrictions.get(i).addToRowFilter(filter, indexRegistry, options);
+            restriction.addToRowFilter(filter, indexRegistry, options);
         }
     }
 }

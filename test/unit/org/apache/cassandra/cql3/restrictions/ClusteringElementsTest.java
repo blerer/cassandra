@@ -35,6 +35,8 @@ import org.apache.cassandra.schema.ColumnMetadata;
 
 import static java.util.Arrays.asList;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
+import static org.apache.cassandra.utils.ComparableTestUtils.assertCompareToEquality;
+import static org.apache.cassandra.utils.ComparableTestUtils.assertOrder;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -623,36 +625,5 @@ public class ClusteringElementsTest
         List<ColumnMetadata> newColumns = new ArrayList<>(columns);
         newColumns.add(newClusteringColumn(type, columns.size()));
         return newColumns;
-    }
-
-    @SafeVarargs
-    private <T extends Comparable<T>> void assertCompareToEquality(T... comparables)
-    {
-        for (int i = 0, m = comparables.length; i < m; i++)
-        {
-            assertEquals(0, comparables[i].compareTo(comparables[i]));
-        }
-    }
-
-    @SafeVarargs
-    private <T extends Comparable<T>> void assertOrder(T... comparables)
-    {
-        for (int i = 0, m = comparables.length; i < m; i++)
-        {
-            for (int j = i; j < m; j++)
-            {
-                if (i == j)
-                {
-                    assertEquals(0, comparables[i].compareTo(comparables[i]));
-                }
-                else
-                {
-                    T smaller = comparables[i];
-                    T greater = comparables[j];
-                    assertTrue(greater + " should be greater than " + smaller, greater.compareTo(smaller) > 0);
-                    assertTrue(smaller + " should be smaller than " + greater, smaller.compareTo(greater) < 0);
-                }
-            }
-        }
     }
 }

@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.restrictions;
 
 import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.RangeSet;
@@ -42,8 +43,12 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.invalidReq
 
 /**
  * A simple predicate on a columns expression (e.g. columnA = X).
+ *
+ * <p>This class implements {@code Comparable} as the order is used to normalize query trees. In a query language like CQL,
+ * equivalent queries can be expressed in different ways. Those differences can make the query analysis process morec complicated
+ * and lead to difference between queries. It is therefore important to ensure that similar queries result in the same query trees.</p>
  */
-public final class SimpleRestriction implements SingleRestriction
+public final class SimpleRestriction implements SingleRestriction, Comparable<SimpleRestriction>
 {
     /**
      * The columns expression to which the restriction applies.
@@ -364,6 +369,33 @@ public final class SimpleRestriction implements SingleRestriction
     private static ByteBuffer inValues(ColumnMetadata column, List<ByteBuffer> values)
     {
         return ListType.getInstance(column.type, false).pack(values);
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        SimpleRestriction that = (SimpleRestriction) o;
+        return Objects.equals(columnsExpression, that.columnsExpression)
+               && operator == that.operator
+               && Objects.equals(values, that.values);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return Objects.hash(columnsExpression, operator, values);
+    }
+
+    @Override
+    public int compareTo(SimpleRestriction that)
+    {
+        int expressionDiff = columnsExpression.compareTo(that.columnsExpression);
+        if (expressionDiff != 0)
+            return expressionDiff;
+
+        return Operator.COMPARATOR.compare(operator, that.operator);
     }
 
     @Override
