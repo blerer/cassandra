@@ -335,7 +335,7 @@ public final class ColumnsExpression
         String toCQLString(List<ColumnIdentifier> identifiers, Term.Raw rawMapKey, FieldIdentifier rawUdtField, Term.Raw rawCollectionElement)
         {
             String mapKey = rawMapKey == null ? null : rawMapKey.getText();
-            String udtField = rawUdtField == null ? null : rawUdtField.toString(); //KATE added just to compile for now; we should probably add some toCQLString in FieldIdentifier?
+            String udtField = rawUdtField == null ? null : rawUdtField.toString(); //KATE added just to compile for now; fix later based on the type of collection
             String collectionElement = rawCollectionElement == null ? null : rawCollectionElement.getText();
             return toCQLString(identifiers.stream().map(ColumnIdentifier::toCQLString), mapKey, udtField, collectionElement);
         }

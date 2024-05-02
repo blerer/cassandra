@@ -81,7 +81,7 @@ public enum Operator
         }
 
         @Override
-        public boolean canBeUsedWith(ColumnsExpression.Kind kind)
+        public boolean inRestrictionCanBeUsedWith(ColumnsExpression.Kind kind)
         {
             return true;
         }
@@ -126,7 +126,7 @@ public enum Operator
         }
 
         @Override
-        public boolean canBeUsedWith(ColumnsExpression.Kind kind)
+        public boolean inRestrictionCanBeUsedWith(ColumnsExpression.Kind kind)
         {
             return kind != ColumnsExpression.Kind.MAP_ELEMENT;
         }
@@ -171,7 +171,7 @@ public enum Operator
         }
 
         @Override
-        public boolean canBeUsedWith(ColumnsExpression.Kind kind)
+        public boolean inRestrictionCanBeUsedWith(ColumnsExpression.Kind kind)
         {
             return kind != ColumnsExpression.Kind.MAP_ELEMENT;
         }
@@ -217,7 +217,7 @@ public enum Operator
         }
 
         @Override
-        public boolean canBeUsedWith(ColumnsExpression.Kind kind)
+        public boolean inRestrictionCanBeUsedWith(ColumnsExpression.Kind kind)
         {
             return kind != ColumnsExpression.Kind.MAP_ELEMENT;
         }
@@ -262,7 +262,7 @@ public enum Operator
         }
 
         @Override
-        public boolean canBeUsedWith(ColumnsExpression.Kind kind)
+        public boolean inRestrictionCanBeUsedWith(ColumnsExpression.Kind kind)
         {
             return kind != ColumnsExpression.Kind.MAP_ELEMENT;
         }
@@ -282,7 +282,7 @@ public enum Operator
         }
 
         @Override
-        public boolean canBeUsedWith(ColumnsExpression.Kind kind)
+        public boolean inRestrictionCanBeUsedWith(ColumnsExpression.Kind kind)
         {
             return kind == ColumnsExpression.Kind.SINGLE_COLUMN || kind == ColumnsExpression.Kind.MULTI_COLUMN;
         }
@@ -576,7 +576,7 @@ public enum Operator
 
     public void validateFor(ColumnsExpression expression)
     {
-        if (!canBeUsedWith(expression.kind()))
+        if (!inRestrictionCanBeUsedWith(expression.kind()))
             throw invalidRequest("%s cannot be used with %s relations", this, expression);
 
         switch (expression.kind())
@@ -626,11 +626,22 @@ public enum Operator
     }
 
     /**
-     * Checks if the specified expression kind can be used with this operator.
+     * Checks if the specified expression kind can be used with this operator in relation.
      * @param kind the expression kind
-     * @return {@code true} if the specified expression kind can be used with this operator, {@code false} otherwise.
+     * @return {@code true} if the specified expression kind can be used with this operator in a relation, {@code false} otherwise.
      */
-    public boolean canBeUsedWith(ColumnsExpression.Kind kind)
+    public boolean inRestrictionCanBeUsedWith(ColumnsExpression.Kind kind)
+    {
+        // All operators support single columns
+        return kind == ColumnsExpression.Kind.SINGLE_COLUMN;
+    }
+
+    /**
+     * Checks if the specified expression kind can be used with this operator in condition.
+     * @param kind the expression kind
+     * @return {@code true} if the specified expression kind can be used with this operator in a condition, {@code false} otherwise.
+     */
+    public boolean inConditionCanBeUsedWith(ColumnsExpression.Kind kind)
     {
         // All operators support single columns
         return kind == ColumnsExpression.Kind.SINGLE_COLUMN;
