@@ -32,7 +32,6 @@ import org.apache.cassandra.cql3.terms.Terms;
 import org.apache.cassandra.cql3.terms.Tuples;
 
 import static java.util.Arrays.asList;
-import static org.apache.cassandra.cql3.Relation.mapElement;
 import static org.apache.cassandra.cql3.Relation.multiColumn;
 import static org.apache.cassandra.cql3.Relation.singleColumn;
 import static org.apache.cassandra.cql3.Relation.token;
@@ -74,8 +73,5 @@ public class RelationTest
 
         assertEquals("token(col, col2) = ?", token(asList(col, col2), Operator.EQ, marker).toCQLString());
         assertEquals("token(col, col2) = token(1, 2)", token(asList(col, col2), Operator.EQ, tokenCall).toCQLString());
-
-        assertEquals("col['text'] = ?", mapElement(col, text, Operator.EQ, marker).toCQLString());
-        assertEquals("col[?] = ?", mapElement(col, marker, Operator.EQ, marker).toCQLString());
     }
 }

@@ -22,12 +22,17 @@ import java.util.Objects;
 
 import org.apache.cassandra.cql3.restrictions.SimpleRestriction;
 import org.apache.cassandra.cql3.restrictions.SingleRestriction;
-import org.apache.cassandra.cql3.terms.Term;
-import org.apache.cassandra.cql3.terms.Terms;
+import org.apache.cassandra.cql3.terms.*;
 import org.apache.cassandra.db.marshal.CollectionType;
+import org.apache.cassandra.db.marshal.ListType;
+import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
+
+import static org.apache.cassandra.cql3.ColumnsExpression.Kind.COLLECTION_ELEMENT;
+import static org.apache.cassandra.cql3.statements.RequestValidations.*;
+import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
 
 /**
  * The parsed version of a {@code SimpleRestriction} as outputed by the CQL parser.
@@ -93,14 +98,14 @@ public final class Relation
      * Creates a relation for a map element (e.g. {@code columnA[?] = ?}).
      *
      * @param identifier the map column identifier
-     * @param rawKey the map element key
+     * @param rawKey the map element key (we do not support list elements in relations yet)
      * @param operator the relation operator
      * @param rawTerm the term to which the map element must be compared
      * @return a relation for a map element.
      */
     public static Relation mapElement(ColumnIdentifier identifier, Term.Raw rawKey, Operator operator, Term.Raw rawTerm)
     {
-        return new Relation(ColumnsExpression.Raw.mapElement(identifier, rawKey), operator, Terms.Raw.of(rawTerm));
+        return new Relation(ColumnsExpression.Raw.collectionElement(identifier, rawKey), operator, Terms.Raw.of(rawTerm));
     }
 
     /**
@@ -167,6 +172,27 @@ public final class Relation
             throw invalidRequest("Unsupported '!=' relation: %s", this);
 
         ColumnsExpression expression = rawExpressions.prepare(table);
+
+        // TODO support restrictions on list elements as we do in conditions
+        if (expression.kind() == COLLECTION_ELEMENT)
+        {
+            ColumnMetadata receiver = table.getExistingColumn(column());
+            switch ((((CollectionType<?>) receiver.type).kind)) {
+                case LIST:
+                    throw invalidRequest("Invalid element access syntax for list column %s", receiver.name);
+                case MAP:
+                    ColumnMetadata column = expression.firstColumn();
+                    checkFalse(column.type instanceof ListType, "Indexes on list entries (%s[index] = value) are not supported.", column.name);
+                    checkTrue(column.type instanceof MapType, "Column %s cannot be used as a map", column.name);
+                    checkTrue(column.type.isMultiCell(), "Map-entry predicates on frozen map column %s are not supported", column.name);
+                    break;
+                case SET:
+                    throw invalidRequest("Invalid element access syntax for set column %s", receiver.name);
+                default:
+                    throw new AssertionError();
+            }
+        }
+
         expression.collectMarkerSpecification(boundNames);
 
         operator.validateFor(expression);
@@ -183,6 +209,11 @@ public final class Relation
             return new SimpleRestriction(expression, Operator.EQ, terms);
 
         return new SimpleRestriction(expression, operator, terms);
+    }
+
+    public ColumnIdentifier column()
+    {
+        return rawExpressions.identifiers().get(0);
     }
 
     /**

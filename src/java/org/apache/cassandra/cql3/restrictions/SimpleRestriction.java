@@ -140,7 +140,8 @@ public final class SimpleRestriction implements SingleRestriction
     {
         return operator == Operator.CONTAINS
                || operator == Operator.CONTAINS_KEY
-               || columnsExpression.kind() == ColumnsExpression.Kind.MAP_ELEMENT;
+                // TODO only map elements supported for now in restrictions
+               || columnsExpression.kind() == ColumnsExpression.Kind.COLLECTION_ELEMENT;
     }
 
     @Override
@@ -148,7 +149,8 @@ public final class SimpleRestriction implements SingleRestriction
     {
         // The need for filtering or indexing is a combination of columns expression type and operator
         // Therefore, we have to take both into account.
-        return columnsExpression.kind() == ColumnsExpression.Kind.MAP_ELEMENT
+        // TODO only map elements supported for now in restrictions
+        return columnsExpression.kind() == ColumnsExpression.Kind.COLLECTION_ELEMENT
                || operator.requiresFilteringOrIndexingFor(columnsExpression.columnsKind());
     }
 
@@ -352,7 +354,8 @@ public final class SimpleRestriction implements SingleRestriction
                     }
                 }
                 break;
-            case MAP_ELEMENT:
+            case COLLECTION_ELEMENT:
+                // TODO only map elements supported for now
                 ByteBuffer key = columnsExpression.mapKey(options);
                 List<ByteBuffer> values = bindAndGet(options);
                 filter.addMapEquality(firstColumn(), key, operator, values.get(0));

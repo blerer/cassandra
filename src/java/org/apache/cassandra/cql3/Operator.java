@@ -128,7 +128,7 @@ public enum Operator
         @Override
         public boolean inRestrictionCanBeUsedWith(ColumnsExpression.Kind kind)
         {
-            return kind != ColumnsExpression.Kind.MAP_ELEMENT;
+            return kind != ColumnsExpression.Kind.COLLECTION_ELEMENT;
         }
     },
     LTE(3)
@@ -173,7 +173,7 @@ public enum Operator
         @Override
         public boolean inRestrictionCanBeUsedWith(ColumnsExpression.Kind kind)
         {
-            return kind != ColumnsExpression.Kind.MAP_ELEMENT;
+            return kind != ColumnsExpression.Kind.COLLECTION_ELEMENT;
         }
 
     },
@@ -219,7 +219,7 @@ public enum Operator
         @Override
         public boolean inRestrictionCanBeUsedWith(ColumnsExpression.Kind kind)
         {
-            return kind != ColumnsExpression.Kind.MAP_ELEMENT;
+            return kind != ColumnsExpression.Kind.COLLECTION_ELEMENT;
         }
     },
     GT(2)
@@ -264,7 +264,7 @@ public enum Operator
         @Override
         public boolean inRestrictionCanBeUsedWith(ColumnsExpression.Kind kind)
         {
-            return kind != ColumnsExpression.Kind.MAP_ELEMENT;
+            return kind != ColumnsExpression.Kind.COLLECTION_ELEMENT;
         }
     },
     IN(7)
@@ -576,6 +576,7 @@ public enum Operator
 
     public void validateFor(ColumnsExpression expression)
     {
+        // this method is used only in restrictions, not in conditions where different rules apply for now
         if (!inRestrictionCanBeUsedWith(expression.kind()))
             throw invalidRequest("%s cannot be used with %s relations", this, expression);
 
@@ -600,7 +601,7 @@ public enum Operator
                     checkFalse(appliesToCollectionElements() && !columnType.isCollection(), "Cannot use %s on non-collection column %s", this, firstColumn.name);
                 }
 
-            case MAP_ELEMENT:
+            case COLLECTION_ELEMENT:
                 ColumnMetadata column = expression.firstColumn();
                 AbstractType<?> type = column.type;
                 if (type.isMultiCell())
@@ -615,7 +616,7 @@ public enum Operator
                     checkFalse(type.isCollection()
                                     && !this.appliesToMapKeys()
                                     && !this.appliesToCollectionElements()
-                                    && expression.kind() != ColumnsExpression.Kind.MAP_ELEMENT,
+                                    && expression.kind() != ColumnsExpression.Kind.COLLECTION_ELEMENT,
                                "Collection column '%s' (%s) cannot be restricted by a '%s' relation",
                                column.name,
                                type.asCQL3Type(),

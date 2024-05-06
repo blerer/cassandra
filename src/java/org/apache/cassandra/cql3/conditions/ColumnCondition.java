@@ -171,7 +171,7 @@ public final class ColumnCondition
      */
     public static ColumnCondition simpleColumnCondition(ColumnsExpression column, Operator op, Terms terms)
     {
-        assert column.udtField() == null && column.collectionElement() == null && column.mapKey() == null;
+        assert column.udtField() == null && column.collectionElement() == null;
 
         return new ColumnCondition(column, op, terms);
     }
