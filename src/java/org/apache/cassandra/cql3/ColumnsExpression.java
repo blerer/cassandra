@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.cql3;
 
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -31,17 +30,13 @@ import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.cql3.functions.Function;
-import org.apache.cassandra.cql3.terms.Lists;
-import org.apache.cassandra.cql3.terms.Maps;
 import org.apache.cassandra.cql3.terms.Term;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.CollectionType;
+import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.TupleType;
-import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkContainsNoDuplicates;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkContainsOnly;
@@ -73,13 +68,13 @@ public final class ColumnsExpression
             }
 
             @Override
-            AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, FieldIdentifier udtField, Term.Raw collectionElement)
+            AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, ElementExpression.Raw element)
             {
                 return columns.get(0).type;
             }
 
             @Override
-            String toCQLString(Stream<String> columns, String udtField, String collectionElement)
+            String toCQLString(Stream<String> columns, String element)
             {
                 return columns.findFirst().orElseThrow();
             }
@@ -106,20 +101,20 @@ public final class ColumnsExpression
 
                     // check that no clustering columns were skipped
                     checkFalse(previousPosition != -1 && column.position() != previousPosition + 1,
-                            "Clustering columns must appear in the PRIMARY KEY order in multi-column relations: %s", toCQLString(columns, null, null));
+                            "Clustering columns must appear in the PRIMARY KEY order in multi-column relations: %s", toCQLString(columns, null));
 
                     previousPosition = column.position();
                 }
             }
 
             @Override
-            AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, FieldIdentifier udtField, Term.Raw collectionElement)
+            AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, ElementExpression.Raw element)
             {
                 return new TupleType(ColumnMetadata.typesOf(columns));
             }
 
             @Override
-            String toCQLString(Stream<String> columns, String udtField, String collectionElement)
+            String toCQLString(Stream<String> columns, String element)
             {
                 return columns.collect(Collectors.joining(", ", "(", ")"));
             }
@@ -154,13 +149,13 @@ public final class ColumnsExpression
             }
 
             @Override
-            AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, FieldIdentifier udtField, Term.Raw collectionElement)
+            AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, ElementExpression.Raw element)
             {
                 return table.partitioner.getTokenValidator();
             }
 
             @Override
-            String toCQLString(Stream<String> columns, String udtField, String collectionElement)
+            String toCQLString(Stream<String> columns, String element)
             {
                 return columns.collect(Collectors.joining(", ", "token(", ")"));
             }
@@ -172,73 +167,40 @@ public final class ColumnsExpression
             }
         },
         /**
-         * UDT field element expression
+         * Element expression (e.g. {@code columnA[?]}). This is used for collection elements and UDT fields. For more
+         * information see {@link ElementExpression}.
          */
-        UDT_FIELD
+        ELEMENT
         {
+            private ElementExpression.Raw elementExpression = null;
+
+            @Override
+            void setElementExpression(ElementExpression.Raw elementExpression)
+            {
+                this.elementExpression = elementExpression;
+            }
             @Override
             void validateColumns(TableMetadata table, List<ColumnMetadata> columns)
             {
             }
 
             @Override
-            AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, FieldIdentifier udtField, Term.Raw collectionElement)
+            AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, ElementExpression.Raw element)
             {
-                UserType userType = (UserType) columns.get(0).type;
-                int fieldPosition = userType.fieldPosition(udtField);
-                if (fieldPosition == -1)
-                    throw invalidRequest("Unknown field %s for column %s", udtField, columns.get(0).name);
-
-                return userType.fieldType(fieldPosition);
+                return element.kind().type(table, columns, element);
             }
 
             @Override
-            String toCQLString(Stream<String> columns, String udtField, String collectionElement)
+            String toCQLString(Stream<String> columns, String element)
             {
-                // KATE fix this later.... for now it is used only in tests anyway
-                return new StringBuilder().append(columns.findFirst().orElseThrow())
-                                          .append('.')
-                                          .append(udtField).toString();
-            }
-
-            @Override
-            public String toString()
-            {
-                return "UDT field element";
-            }
-        },
-        /**
-         * Collection element expression
-         */
-        COLLECTION_ELEMENT {
-            @Override
-            void validateColumns(TableMetadata table, List<ColumnMetadata> columns)
-            {
-            }
-
-            @Override
-            AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, FieldIdentifier udtField, Term.Raw collectionElement)
-            {
-                return ((CollectionType<?>) columns.get(0).type).valueComparator();
-            }
-
-            @Override
-            String toCQLString(Stream<String> columns, String udtField, String collectionElement)
-            {
-                return new StringBuilder().append(columns.findFirst().orElseThrow())
-                                          .append('[')
-                                          .append(collectionElement)
-                                          .append(']')
-                                          .toString();
-            }
-
-            @Override
-            public String toString()
-            {
-                return "collection element";
+                return columns.findFirst().orElseThrow() + elementExpression.kind().toCQLString(element);
             }
         };
 
+        void setElementExpression(ElementExpression.Raw elementExpression)
+        {
+            throw new UnsupportedOperationException();
+        }
 
         /**
          * Validates that the specified columns are valid for this kind of expression.
@@ -252,64 +214,77 @@ public final class ColumnsExpression
          *
          * @param table             the table metadata
          * @param columns           the expression columns
-         * @param udtField          the udt field in case of a UDT field expression
-         * @param collectionElement the collection element in case of a collection element expression
+         * @param element           the element expression in case of ELEMENT columns expression
          * @return the expression type
          */
-        abstract AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, FieldIdentifier udtField, Term.Raw collectionElement);
+        abstract AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, ElementExpression.Raw element);
 
         /**
          * Returns CQL representation of the expression.
          *
          * @param columns           the expression's columns
-         * @param udtField          udt field in case of a UDT field expression
-         * @param collectionElement the collection element in case of a collection element expression
+         * @param element           the element in case of ELEMENT columns expression
          * @return the CQL representation of the expression.
          */
-        abstract String toCQLString(Stream<String> columns, String udtField, String collectionElement);
+        abstract String toCQLString(Stream<String> columns, String element);
 
-        String toCQLString(List<ColumnMetadata> columns, FieldIdentifier udtField, Term collectionElement)
+        String toCQLString(List<ColumnMetadata> columns, ElementExpression elementExpression)
         {
-            CQL3Type type;
-            String k = null, u = null;
-            switch (this) {
-                case COLLECTION_ELEMENT:
-                    type = ((CollectionType<?>) columns.get(0).type).valueComparator().asCQL3Type();
-                    // If a Term is not terminal it can be a row marker or a function.
-                    // We ignore the fact that it could be a function for now.
-                    k = collectionElement.isTerminal() ? type.toCQLLiteral(((Term.Terminal) collectionElement).get()) : "?";
-                    break;
-                case UDT_FIELD:
-                    UserType userType = (UserType) columns.get(0).type;
-                    int fieldPosition = userType.fieldPosition(udtField);
-                    type = userType.fieldType(fieldPosition).asCQL3Type();
-                    u = type.toCQLLiteral(udtField.bytes);
-                    break;
+            CQL3Type cql3Type;
+            String element = null;
+            if (elementExpression != null)
+            {
+                switch (elementExpression.kind())
+                {
+                    case COLLECTION_ELEMENT:
+                        AbstractType<?> type = columns.get(0).type;
+                        if (type instanceof MapType<?,?>)
+                            cql3Type = ((MapType<?,?>) type).getKeysType().asCQL3Type();
+                        else
+                            cql3Type = elementExpression.type().asCQL3Type();
+                        // If a Term is not terminal it can be a row marker or a function.
+                        // We ignore the fact that it could be a function for now.
+                        element = elementExpression.collectionElement().isTerminal() ? cql3Type.toCQLLiteral(((Term.Terminal) elementExpression.collectionElement()).get()) : "?";
+                        break;
+                    case UDT_FIELD:
+                        cql3Type = elementExpression.type().asCQL3Type();
+                        element = cql3Type.toCQLLiteral(elementExpression.fieldIdentifier().bytes);
+                        break;
+                }
             }
-
-            return toCQLString(columns.stream().map(c -> c.name.toCQLString()), u, k);
+            return toCQLString(columns.stream().map(c -> c.name.toCQLString()), element);
         }
 
-        String toCQLString(List<ColumnIdentifier> identifiers, FieldIdentifier rawUdtField, Term.Raw rawCollectionElement)
+        String toCQLString(List<ColumnIdentifier> identifiers, ElementExpression.Raw rawElement)
         {
-            String udtField = rawUdtField == null ? null : rawUdtField.toString();
-            String collectionElement = rawCollectionElement == null ? null : rawCollectionElement.getText();
-            return toCQLString(identifiers.stream().map(ColumnIdentifier::toCQLString), udtField, collectionElement);
+            if (this == ELEMENT)
+            {
+                assert rawElement != null;
+
+                String udtField = rawElement.rawUdtField() == null ? null : rawElement.rawUdtField().toString();
+                String collectionElement = rawElement.rawCollectionElement() == null ? null : rawElement.rawCollectionElement().getText();
+
+                switch (rawElement.kind())
+                {
+                    case COLLECTION_ELEMENT:
+                        return toCQLString(identifiers.stream().map(ColumnIdentifier::toCQLString), collectionElement);
+                    case UDT_FIELD:
+                        return toCQLString(identifiers.stream().map(ColumnIdentifier::toCQLString), udtField);
+                }
+            }
+
+
+            return toCQLString(identifiers.stream().map(ColumnIdentifier::toCQLString), null);
         }
     }
 
-    /**
-     * The kind of columns expression.
-     */
     private final Kind kind;
 
     /**
      * The type represented by this expression:
      *  - for a single column the type of the expression will be the one of the column
-     *  - for a map element expression the type will be the one of the map value
      *  - for a multi-column expression the type will be a tuple type
-     *  - for a collection element expression the type will be the one of the collection elements
-     *  - for a UDT field expression the type will be the one of the UDT field
+     *  - for an element expression the type will be the one of the element of interest(udt field or collection element)
      */
     private final AbstractType<?> type;
 
@@ -319,25 +294,18 @@ public final class ColumnsExpression
     private final List<ColumnMetadata> columns;
 
     /**
-     * The UDT field if this expression is for a UDT field element,
-     * {@code null} otherwise.
+     * The element if this is an ELEMENT expression, {@code null} otherwise.
+     * Like UDT field or collection element.
      */
-    private final FieldIdentifier udtField;
+    private final ElementExpression element; //Only relevant for ELEMENT kind
 
-    /**
-     * The collection element if this expression is for a collection element,
-     * {@code null} otherwise.
-     */
-    private final Term collectionElement;
-
-
-    private ColumnsExpression(Kind kind, AbstractType<?> type, List<ColumnMetadata> columns, FieldIdentifier udtField, Term collectionElement)
+    ColumnsExpression(Kind kind, AbstractType<?> type, List<ColumnMetadata> columns,  ElementExpression element)
     {
         this.kind = kind;
         this.type = type;
         this.columns = columns;
-        this.udtField = udtField;
-        this.collectionElement = collectionElement;
+        this.element = element; // This could be null for kinds that don't use it
+
     }
 
     /**
@@ -347,7 +315,7 @@ public final class ColumnsExpression
      */
     public static ColumnsExpression singleColumn(ColumnMetadata column)
     {
-        return new ColumnsExpression(Kind.SINGLE_COLUMN, column.type, ImmutableList.of(column), null, null);
+        return new ColumnsExpression(Kind.SINGLE_COLUMN, column.type, ImmutableList.of(column), null);
     }
 
     /**
@@ -361,7 +329,7 @@ public final class ColumnsExpression
         AbstractType<?> type = new TupleType(columns.stream()
                                                     .map(c -> c.type)
                                                     .collect(Collectors.toList()));
-        return new ColumnsExpression(Kind.MULTI_COLUMN, type, ImmutableList.copyOf(columns),null, null);
+        return new ColumnsExpression(Kind.MULTI_COLUMN, type, ImmutableList.copyOf(columns),null);
     }
 
     /**
@@ -392,15 +360,6 @@ public final class ColumnsExpression
     }
 
     /**
-     * Returns the column type.
-     * @return the column type.
-     */
-    public AbstractType<?> type()
-    {
-        return type;
-    }
-
-    /**
      * Returns the column kind (partition key, clustering, static or regular).
      * @return the column kind.
      */
@@ -420,45 +379,82 @@ public final class ColumnsExpression
     }
 
     /**
-     * Returns the UDT field in case of UDT_FIELD columns expression.
-     * @return the UDT_FIELD expression UDT field.
+     * Returns the element in case of ELEMENT columns expression.
+     * @return the ELEMENT expression element - udt field, collection element.
      */
-    public FieldIdentifier udtField()
+    public ElementExpression element()
     {
-        return udtField;
+        return element;
     }
 
     /**
-     * Returns the collection element in case of COLLECTION_ELEMENT columns expression.
-     * @return the COLLECTION_ELEMENT expression collection element.
+     * Returns the element in case of ELEMENT columns expression - COLLECTION_ELEMENT.
+     * @return the ELEMENT expression element - collection element.
      */
     public Term collectionElement()
     {
-        return collectionElement;
-    }
+        assert kind == Kind.ELEMENT && element != null && element.kind() == ElementExpression.Kind.COLLECTION_ELEMENT;
 
-    public ByteBuffer mapKey(QueryOptions options)
-    {
-        ByteBuffer key = collectionElement.bindAndGet(options);
-        if (key == null)
-            throw invalidRequest("Invalid null map key for column %s", firstColumn().name.toCQLString());
-        if (key == ByteBufferUtil.UNSET_BYTE_BUFFER)
-            throw invalidRequest("Invalid unset map key for column %s", firstColumn().name.toCQLString());
-        return key;
+        return element.collectionElement();
     }
 
     /**
-     * Collects the column specifications for the bind variables in the map key.
-     * This is obviously a no-op if the expression is not a {@code COLLECTION_ELEMENT} expression.
+     * Returns the element in case of ELEMENT columns expression - UDT_FIELD.
+     * @return the ELEMENT expression element - UDT field.
+     */
+    public FieldIdentifier udtField()
+    {
+        assert kind == Kind. ELEMENT &&  element != null && element.kind() == ElementExpression.Kind.UDT_FIELD;
+
+        return element.fieldIdentifier();
+    }
+
+    /**
+     * Returns the element expression kind in case of ELEMENT columns expression.
+     * @return the element expression kind.
+     */
+    public ElementExpression.Kind elementKind()
+    {
+        return this.element().kind();
+    }
+
+    /**
+     * Checks if this instance is a collection element expression.
+     * @return {@code true} if this instance is a collection element expression, {@code false} otherwise.
+     */
+    public boolean isCollectionElementExpression()
+    {
+        return kind == Kind.ELEMENT && element != null && element.kind() == ElementExpression.Kind.COLLECTION_ELEMENT;
+    }
+
+    /**
+     * Checks if this instance is a UDT field element expression.
+     * @return {@code true} if this instance is a UDT field element expression, {@code false} otherwise.
+     */
+    public boolean isUDTFieldElementExpression()
+    {
+        return kind == Kind.ELEMENT && element != null && element.kind() == ElementExpression.Kind.UDT_FIELD;
+    }
+
+    /**
+     * Checks if this instance is a map element expression.
+     * @return {@code true} if this instance is a map element expression, {@code false} otherwise.
+     */
+    public boolean isMapElementExpression()
+    {
+        return kind == Kind.ELEMENT && element != null && element.kind() == ElementExpression.Kind.COLLECTION_ELEMENT && firstColumn().type instanceof MapType;
+    }
+
+    /**
+     * Collects the column specifications for the bind variables.
+     * This is obviously a no-op if the expression is not a {@code ELEMENET_EXPRESSION} expression.
      *
      * @param boundNames the variables specification where to collect the
-     * bind variables of the map key in.
+     * bind variables of the map key/collection element in.
      */
     public void collectMarkerSpecification(VariableSpecifications boundNames)
     {
-        if (collectionElement != null)
-            collectionElement.collectMarkerSpecification(boundNames);
-
+        collectionElement().collectMarkerSpecification(boundNames);
     }
 
     /**
@@ -477,8 +473,7 @@ public final class ColumnsExpression
      */
     public void addFunctionsTo(List<Function> functions)
     {
-        if (collectionElement != null)
-            collectionElement.addFunctionsTo(functions);
+        collectionElement().addFunctionsTo(functions);
     }
 
     /**
@@ -487,7 +482,7 @@ public final class ColumnsExpression
      */
     public String toCQLString()
     {
-        return kind.toCQLString(columns, udtField, collectionElement);
+        return kind.toCQLString(columns, element);
     }
 
     @Override
@@ -511,8 +506,8 @@ public final class ColumnsExpression
     }
 
     /**
-     * The parsed version of the {@code ColumnsExpression} as outputed by the CQL parser.
-     * {@code Raw.prepare} will be called upon schema binding to create the {@code ColumnsExpression}.
+     * The parsed version of the {@link ColumnsExpression} as outputed by the CQL parser.
+     * {@code Raw.prepare} will be called upon schema binding to create the {@link ColumnsExpression}.
      */
     public static final class Raw
     {
@@ -523,16 +518,15 @@ public final class ColumnsExpression
          */
         private final List<ColumnIdentifier> identifiers;
 
-        private final FieldIdentifier rawUdtField;
+        private final ElementExpression.Raw rawElement;
 
-        private final Term.Raw rawCollectionElement;
-
-        private Raw(Kind kind, List<ColumnIdentifier> identifiers, FieldIdentifier udtField, Term.Raw collectionElement)
+        private Raw(Kind kind, List<ColumnIdentifier> identifiers, ElementExpression.Raw rawElement)
         {
             this.kind = kind;
+            if(kind == Kind.ELEMENT)
+                Kind.ELEMENT.setElementExpression(rawElement);
             this.identifiers = identifiers;
-            this.rawUdtField = udtField;
-            this.rawCollectionElement = collectionElement;
+            this.rawElement = rawElement;
         }
 
         /**
@@ -551,53 +545,58 @@ public final class ColumnsExpression
          */
         public static Raw singleColumn(ColumnIdentifier identifier)
         {
-            return new Raw(Kind.SINGLE_COLUMN, ImmutableList.of(identifier), null, null);
+            return new Raw(Kind.SINGLE_COLUMN, ImmutableList.of(identifier), null);
         }
 
         /**
          * Creates a raw expression for multi-column (e.g. {@code (columnA, columnB)}).
+         *
          * @param identifiers the columns identifier
          * @return a raw expression for multi-column.
          */
         public static Raw multiColumn(List<ColumnIdentifier> identifiers)
         {
-            return new Raw(Kind.MULTI_COLUMN, identifiers, null, null);
+            return new Raw(Kind.MULTI_COLUMN, identifiers, null);
         }
 
         /**
          * Creates a raw expression for token restrictions (e.g. {@code token(columnA, columnB)}).
+         *
          * @param identifiers the columns identifiers
          * @return a raw token expression.
          */
         public static Raw token(List<ColumnIdentifier> identifiers)
         {
-            return new Raw(Kind.TOKEN, identifiers, null, null);
+            return new Raw(Kind.TOKEN, identifiers, null);
         }
 
         /**
-         * Creates a raw expression for a collection element conditions (e.g. {@code columnA[?]}).
+         * Creates a raw expression for collection element conditions (e.g. {@code columnA[?]}).
+         *
          * @param identifier the collection element column identifier
          * @param rawCollectionElement the raw collection element
          * @return a raw element expression.
          */
         public static Raw collectionElement(ColumnIdentifier identifier, Term.Raw rawCollectionElement)
         {
-            return new Raw(Kind.COLLECTION_ELEMENT, ImmutableList.of(identifier), null, rawCollectionElement);
+            return new Raw(Kind.ELEMENT, ImmutableList.of(identifier), new ElementExpression.Raw(rawCollectionElement, null, ElementExpression.Kind.COLLECTION_ELEMENT));
         }
 
         /**
          * Creates a raw expression for a UDT field conditions.
+         *
          * @param identifier the UDT field column identifier
          * @param rawUdtField the raw UDT field
          * @return a raw element expression.
          */
         public static Raw udtField(ColumnIdentifier identifier, FieldIdentifier rawUdtField)
         {
-            return new Raw(Kind.UDT_FIELD, ImmutableList.of(identifier), rawUdtField, null);
+            return new Raw(Kind.ELEMENT, ImmutableList.of(identifier), new ElementExpression.Raw(null, rawUdtField, ElementExpression.Kind.UDT_FIELD));
         }
 
         /**
          * Renames an identifier in this expression, if applicable.
+         *
          * @param from the old identifier
          * @param to the new identifier
          * @return this object, if the old identifier is not in the set of identifiers that this expression covers; otherwise
@@ -611,55 +610,38 @@ public final class ColumnsExpression
             List<ColumnIdentifier> newIdentifiers = identifiers.stream()
                                                                .map(e -> e.equals(from) ? to : e)
                                                                .collect(Collectors.toList());
-            return new Raw(kind, newIdentifiers, rawUdtField, rawCollectionElement);
+            return new Raw(kind, newIdentifiers, rawElement);
         }
 
         /**
-         * Bind this {@code Raw} instance to the schema and return the resulting {@code ColumnsExpression}.
+         * Bind this {@link Raw} instance to the schema and return the resulting {@link ColumnsExpression}.
          *
          * @param table the table schema
-         * @return the {@code ColumnsExpression} resulting from the schema binding
+         * @return the {@link ColumnsExpression} resulting from the schema binding
          */
         public ColumnsExpression prepare(TableMetadata table)
         {
             List<ColumnMetadata> columns = getColumnsMetadata(table, identifiers);
             kind.validateColumns(table, columns);
-            Term collectionElement = prepareCollectionElement(table, rawCollectionElement);
-            AbstractType<?> type = kind.type(table, columns, rawUdtField, rawCollectionElement);
-            return new ColumnsExpression(kind, type, columns, rawUdtField, collectionElement);
-        }
 
-        private Term prepareCollectionElement(TableMetadata table, Term.Raw rawCollectionElement) {
-            if (kind != Kind.COLLECTION_ELEMENT)
-                return null;
+            AbstractType<?> type = kind.type(table, columns, rawElement);
 
-            ColumnSpecification elementSpec;
-            ColumnMetadata receiver = table.getExistingColumn(identifiers.get(0));
+            ElementExpression elementExpression = null;
+            if (kind == Kind.ELEMENT)
+                elementExpression = rawElement.prepare(table, identifiers.get(0), type);
 
-            switch ((((CollectionType<?>) receiver.type).kind)) {
-                case LIST:
-                    elementSpec = Lists.indexSpecOf(receiver);
-                    break;
-                case MAP:
-                    elementSpec = Maps.keySpecOf(receiver);
-                    break;
-                case SET:
-                    throw invalidRequest("Invalid element access syntax for set column %s", receiver.name);
-                default:
-                    throw new AssertionError();
-            }
-
-            return rawCollectionElement.prepare(table.keyspace, elementSpec);
+            return new ColumnsExpression(kind, type, columns, elementExpression);
         }
 
         /**
          * Returns the columns corresponding to the identifiers.
          *
          * @param table the table metadata
+         * @param identifiers the columns identifiers
          * @return the definition of the columns to which apply the token restriction.
          * @throws InvalidRequestException if the entity cannot be resolved
          */
-        private static List<ColumnMetadata> getColumnsMetadata(TableMetadata table, List<ColumnIdentifier> identifiers)
+        static List<ColumnMetadata> getColumnsMetadata(TableMetadata table, List<ColumnIdentifier> identifiers)
         {
             List<ColumnMetadata> columns = new ArrayList<>(identifiers.size());
             for (ColumnIdentifier id : identifiers)
@@ -669,6 +651,7 @@ public final class ColumnsExpression
 
         /**
          * Returns the columns' identifiers.
+         *
          * @return identifiers.
          */
         public List<ColumnIdentifier> identifiers()
@@ -679,7 +662,7 @@ public final class ColumnsExpression
         @Override
         public int hashCode()
         {
-            return Objects.hash(kind, identifiers);
+            return Objects.hash(kind, identifiers, rawElement);
         }
 
         @Override
@@ -692,16 +675,17 @@ public final class ColumnsExpression
                 return false;
 
             Raw r = (Raw) o;
-            return kind == r.kind && Objects.equals(identifiers, r.identifiers);
+            return kind == r.kind && Objects.equals(identifiers, r.identifiers) && Objects.equals(rawElement, r.rawElement);
         }
 
         /**
          * Returns CQL representation of this raw expression.
+         *
          * @return the CQL representation of this raw expression.
          */
         public String toCQLString()
         {
-            return kind.toCQLString(identifiers, rawUdtField, rawCollectionElement);
+            return kind.toCQLString(identifiers, rawElement);
         }
     }
 }

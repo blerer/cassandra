@@ -96,10 +96,8 @@ public final class ColumnCondition
         {
             case SINGLE_COLUMN:
                 return bindSingleColumn(options);
-            case COLLECTION_ELEMENT:
-                return bindCollectionElement(options);
-            case UDT_FIELD:
-                return bindUdtField(options);
+            case ELEMENT:
+                return bindElement(options);
             default:
                 throw new UnsupportedOperationException();
         }
@@ -115,6 +113,20 @@ public final class ColumnCondition
             return new MultiCellUdtBound(column, operator, bindAndGetTerms(options), options.getProtocolVersion());
 
         return new SimpleBound(column, operator, bindAndGetTerms(options));
+    }
+
+    private ColumnCondition.Bound bindElement(QueryOptions options)
+    {
+        switch (columnsExpression.elementKind())
+        {
+            case UDT_FIELD:
+                return bindUdtField(options);
+            case COLLECTION_ELEMENT:
+                return bindCollectionElement(options);
+            default:
+                throw new UnsupportedOperationException();
+        }
+
     }
 
     private Bound bindCollectionElement(QueryOptions options)
@@ -171,7 +183,7 @@ public final class ColumnCondition
      */
     public static ColumnCondition simpleColumnCondition(ColumnsExpression column, Operator op, Terms terms)
     {
-        assert column.udtField() == null && column.collectionElement() == null;
+        assert column.element() == null;
 
         return new ColumnCondition(column, op, terms);
     }
@@ -181,7 +193,7 @@ public final class ColumnCondition
      */
     public static ColumnCondition collectionColumnCondition(ColumnsExpression column, Operator op, Terms terms)
     {
-        assert column.collectionElement() != null;
+        assert column.isCollectionElementExpression() : "Column must be a collection element expression";
 
         return new ColumnCondition(column, op, terms);
     }
@@ -191,7 +203,7 @@ public final class ColumnCondition
      */
     public static ColumnCondition udtFieldCondition(ColumnsExpression column, Operator op, Terms terms)
     {
-        assert column.udtField() != null;
+        assert column.isUDTFieldElementExpression() : "Column must be a UDT field element expression";
 
         return new ColumnCondition(column, op, terms);
     }
@@ -772,39 +784,42 @@ public final class ColumnCondition
             if (receiver.type instanceof CounterColumnType)
                 throw invalidRequest("Conditions on counters are not supported");
 
-            switch (expression.kind())
+            if (expression.kind() == ColumnsExpression.Kind.ELEMENT)
             {
-                case COLLECTION_ELEMENT:
-                    if (!(receiver.type.isCollection()))
-                        throw invalidRequest("Invalid element access syntax for non-collection column %s", receiver.name);
+                switch (expression.elementKind())
+                {
+                    case COLLECTION_ELEMENT:
+                        if (!(receiver.type.isCollection()))
+                            throw invalidRequest("Invalid element access syntax for non-collection column %s", receiver.name);
 
-                    ColumnSpecification valueSpec;
-                    switch ((((CollectionType<?>) receiver.type).kind))
-                    {
-                        case LIST:
-                            valueSpec = Lists.valueSpecOf(receiver);
-                            break;
-                        case MAP:
-                            valueSpec = Maps.valueSpecOf(receiver);
-                            break;
-                        case SET:
-                            throw invalidRequest("Invalid element access syntax for set column %s", receiver.name);
-                        default:
-                            throw new AssertionError();
-                    }
+                        ColumnSpecification valueSpec;
+                        switch ((((CollectionType<?>) receiver.type).kind))
+                        {
+                            case LIST:
+                                valueSpec = Lists.valueSpecOf(receiver);
+                                break;
+                            case MAP:
+                                valueSpec = Maps.valueSpecOf(receiver);
+                                break;
+                            case SET:
+                                throw invalidRequest("Invalid element access syntax for set column %s", receiver.name);
+                            default:
+                                throw new AssertionError();
+                        }
 
-                    validateOperationOnDurations(valueSpec.type);
-                    return collectionColumnCondition(expression, operator, prepareTerms(table.keyspace, valueSpec));
+                        validateOperationOnDurations(valueSpec.type);
+                        return collectionColumnCondition(expression, operator, prepareTerms(table.keyspace, valueSpec));
 
-                case UDT_FIELD:
-                    UserType userType = (UserType) receiver.type;
-                    int fieldPosition = userType.fieldPosition(udtField);
-                    if (fieldPosition == -1)
-                        throw invalidRequest("Unknown field %s for column %s", udtField, receiver.name);
+                    case UDT_FIELD:
+                        UserType userType = (UserType) receiver.type;
+                        int fieldPosition = userType.fieldPosition(udtField);
+                        if (fieldPosition == -1)
+                            throw invalidRequest("Unknown field %s for column %s", udtField, receiver.name);
 
-                    ColumnSpecification fieldReceiver = UserTypes.fieldSpecOf(receiver, fieldPosition);
-                    validateOperationOnDurations(fieldReceiver.type);
-                    return ColumnCondition.udtFieldCondition(expression, operator, prepareTerms(table.keyspace, fieldReceiver));
+                        ColumnSpecification fieldReceiver = UserTypes.fieldSpecOf(receiver, fieldPosition);
+                        validateOperationOnDurations(fieldReceiver.type);
+                        return ColumnCondition.udtFieldCondition(expression, operator, prepareTerms(table.keyspace, fieldReceiver));
+                }
             }
 
             validateOperationOnDurations(receiver.type);
@@ -844,7 +859,7 @@ public final class ColumnCondition
         @VisibleForTesting
         public String toCQLString()
         {
-            return String.format("%s %s %s", rawExpressions.toCQLString(), operator, values.getText());
+            return String.format("%s %s %s", rawExpressions == null ? null : rawExpressions.toCQLString(), operator, values.getText());
         }
 
         @Override

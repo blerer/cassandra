@@ -81,7 +81,7 @@ public enum Operator
         }
 
         @Override
-        public boolean inRestrictionCanBeUsedWith(ColumnsExpression.Kind kind)
+        public boolean inRestrictionCanBeUsedWith(ColumnsExpression expression)
         {
             return true;
         }
@@ -126,9 +126,12 @@ public enum Operator
         }
 
         @Override
-        public boolean inRestrictionCanBeUsedWith(ColumnsExpression.Kind kind)
+        public boolean inRestrictionCanBeUsedWith(ColumnsExpression expression)
         {
-            return kind != ColumnsExpression.Kind.COLLECTION_ELEMENT;
+            if (expression.kind() == ColumnsExpression.Kind.ELEMENT)
+                return expression.elementKind() != ElementExpression.Kind.COLLECTION_ELEMENT;
+
+            return true;
         }
     },
     LTE(3)
@@ -171,9 +174,12 @@ public enum Operator
         }
 
         @Override
-        public boolean inRestrictionCanBeUsedWith(ColumnsExpression.Kind kind)
+        public boolean inRestrictionCanBeUsedWith(ColumnsExpression expression)
         {
-            return kind != ColumnsExpression.Kind.COLLECTION_ELEMENT;
+            if (expression.kind() == ColumnsExpression.Kind.ELEMENT)
+                return expression.elementKind() != ElementExpression.Kind.COLLECTION_ELEMENT;
+
+            return true;
         }
 
     },
@@ -217,9 +223,12 @@ public enum Operator
         }
 
         @Override
-        public boolean inRestrictionCanBeUsedWith(ColumnsExpression.Kind kind)
+        public boolean inRestrictionCanBeUsedWith(ColumnsExpression expression)
         {
-            return kind != ColumnsExpression.Kind.COLLECTION_ELEMENT;
+            if (expression.kind() == ColumnsExpression.Kind.ELEMENT)
+                return expression.elementKind() != ElementExpression.Kind.COLLECTION_ELEMENT;
+
+            return true;
         }
     },
     GT(2)
@@ -262,9 +271,12 @@ public enum Operator
         }
 
         @Override
-        public boolean inRestrictionCanBeUsedWith(ColumnsExpression.Kind kind)
+        public boolean inRestrictionCanBeUsedWith(ColumnsExpression expression)
         {
-            return kind != ColumnsExpression.Kind.COLLECTION_ELEMENT;
+            if (expression.kind() == ColumnsExpression.Kind.ELEMENT)
+                return expression.elementKind() != ElementExpression.Kind.COLLECTION_ELEMENT;
+
+            return true;
         }
     },
     IN(7)
@@ -282,9 +294,9 @@ public enum Operator
         }
 
         @Override
-        public boolean inRestrictionCanBeUsedWith(ColumnsExpression.Kind kind)
+        public boolean inRestrictionCanBeUsedWith(ColumnsExpression expression)
         {
-            return kind == ColumnsExpression.Kind.SINGLE_COLUMN || kind == ColumnsExpression.Kind.MULTI_COLUMN;
+            return expression.kind() == ColumnsExpression.Kind.SINGLE_COLUMN || expression.kind() == ColumnsExpression.Kind.MULTI_COLUMN;
         }
     },
     CONTAINS(5)
@@ -577,7 +589,7 @@ public enum Operator
     public void validateFor(ColumnsExpression expression)
     {
         // this method is used only in restrictions, not in conditions where different rules apply for now
-        if (!inRestrictionCanBeUsedWith(expression.kind()))
+        if (!inRestrictionCanBeUsedWith(expression))
             throw invalidRequest("%s cannot be used with %s relations", this, expression);
 
         switch (expression.kind())
@@ -601,7 +613,8 @@ public enum Operator
                     checkFalse(appliesToCollectionElements() && !columnType.isCollection(), "Cannot use %s on non-collection column %s", this, firstColumn.name);
                 }
 
-            case COLLECTION_ELEMENT:
+            // intentional fallthrough - missing break statement
+            case ELEMENT:
                 ColumnMetadata column = expression.firstColumn();
                 AbstractType<?> type = column.type;
                 if (type.isMultiCell())
@@ -614,27 +627,27 @@ public enum Operator
 
                     // We don't support relations against entire collections (unless they're frozen), like "numbers = {1, 2, 3}"
                     checkFalse(type.isCollection()
-                                    && !this.appliesToMapKeys()
-                                    && !this.appliesToCollectionElements()
-                                    && expression.kind() != ColumnsExpression.Kind.COLLECTION_ELEMENT,
+                               && !this.appliesToMapKeys()
+                               && !this.appliesToCollectionElements()
+                               && !expression.isCollectionElementExpression(),
                                "Collection column '%s' (%s) cannot be restricted by a '%s' relation",
                                column.name,
                                type.asCQL3Type(),
                                this);
                 }
-                break;
+            break;
         }
     }
 
     /**
      * Checks if the specified expression kind can be used with this operator in relation.
-     * @param kind the expression kind
+     * @param expression the column expression
      * @return {@code true} if the specified expression kind can be used with this operator in a relation, {@code false} otherwise.
      */
-    public boolean inRestrictionCanBeUsedWith(ColumnsExpression.Kind kind)
+    public boolean inRestrictionCanBeUsedWith(ColumnsExpression expression)
     {
         // All operators support single columns
-        return kind == ColumnsExpression.Kind.SINGLE_COLUMN;
+        return expression.kind() == ColumnsExpression.Kind.SINGLE_COLUMN;
     }
 
     /**

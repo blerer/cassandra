@@ -30,7 +30,6 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 
-import static org.apache.cassandra.cql3.ColumnsExpression.Kind.COLLECTION_ELEMENT;
 import static org.apache.cassandra.cql3.statements.RequestValidations.*;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
 
@@ -171,33 +170,22 @@ public final class Relation
         if (operator == Operator.NEQ)
             throw invalidRequest("Unsupported '!=' relation: %s", this);
 
-        ColumnsExpression expression = rawExpressions.prepare(table);
+        ColumnsExpression columnsExpression = rawExpressions.prepare(table);
 
-        // TODO support restrictions on list elements as we do in conditions
-        if (expression.kind() == COLLECTION_ELEMENT)
+        // TODO support restrictions on list elements as we do in conditions, then we can probably move below validations
+        //  to ElementExpression prepare/validateColumns
+        if (columnsExpression.isMapElementExpression())
         {
-            ColumnMetadata receiver = table.getExistingColumn(column());
-            switch ((((CollectionType<?>) receiver.type).kind)) {
-                case LIST:
-                    throw invalidRequest("Invalid element access syntax for list column %s", receiver.name);
-                case MAP:
-                    ColumnMetadata column = expression.firstColumn();
-                    checkFalse(column.type instanceof ListType, "Indexes on list entries (%s[index] = value) are not supported.", column.name);
-                    checkTrue(column.type instanceof MapType, "Column %s cannot be used as a map", column.name);
-                    checkTrue(column.type.isMultiCell(), "Map-entry predicates on frozen map column %s are not supported", column.name);
-                    break;
-                case SET:
-                    throw invalidRequest("Invalid element access syntax for set column %s", receiver.name);
-                default:
-                    throw new AssertionError();
-            }
+            ColumnMetadata column = columnsExpression.firstColumn();
+            checkFalse(column.type instanceof ListType, "Indexes on list entries (%s[index] = value) are not supported.", column.name);
+            checkTrue(column.type instanceof MapType, "Column %s cannot be used as a map", column.name);
+            checkTrue(column.type.isMultiCell(), "Map-entry predicates on frozen map column %s are not supported", column.name);
+            columnsExpression.collectMarkerSpecification(boundNames);
         }
 
-        expression.collectMarkerSpecification(boundNames);
+        operator.validateFor(columnsExpression);
 
-        operator.validateFor(expression);
-
-        ColumnSpecification receiver = expression.columnSpecification();
+        ColumnSpecification receiver = columnsExpression.columnSpecification();
         if (!operator.appliesToColumnValues())
             receiver = ((CollectionType<?>) receiver.type).makeCollectionReceiver(receiver, operator.appliesToMapKeys());
 
@@ -206,9 +194,9 @@ public final class Relation
 
         // An IN restriction with only one element is the same as an EQ restriction
         if (operator.isIN() && terms.containsSingleTerm())
-            return new SimpleRestriction(expression, Operator.EQ, terms);
+            return new SimpleRestriction(columnsExpression, Operator.EQ, terms);
 
-        return new SimpleRestriction(expression, operator, terms);
+        return new SimpleRestriction(columnsExpression, operator, terms);
     }
 
     public ColumnIdentifier column()
