@@ -234,20 +234,21 @@ public final class ColumnsExpression
             String element = null;
             if (elementExpression != null)
             {
+                AbstractType<?> type = columns.get(0).type;
                 switch (elementExpression.kind())
                 {
                     case COLLECTION_ELEMENT:
-                        AbstractType<?> type = columns.get(0).type;
+
                         if (type instanceof MapType<?,?>)
                             cql3Type = ((MapType<?,?>) type).getKeysType().asCQL3Type();
                         else
-                            cql3Type = elementExpression.type().asCQL3Type();
+                            cql3Type = type.asCQL3Type();
                         // If a Term is not terminal it can be a row marker or a function.
                         // We ignore the fact that it could be a function for now.
                         element = elementExpression.collectionElement().isTerminal() ? cql3Type.toCQLLiteral(((Term.Terminal) elementExpression.collectionElement()).get()) : "?";
                         break;
                     case UDT_FIELD:
-                        cql3Type = elementExpression.type().asCQL3Type();
+                        cql3Type = type.asCQL3Type();
                         element = cql3Type.toCQLLiteral(elementExpression.fieldIdentifier().bytes);
                         break;
                 }
@@ -454,7 +455,8 @@ public final class ColumnsExpression
      */
     public void collectMarkerSpecification(VariableSpecifications boundNames)
     {
-        collectionElement().collectMarkerSpecification(boundNames);
+        if (this.isCollectionElementExpression())
+            collectionElement().collectMarkerSpecification(boundNames);
     }
 
     /**
@@ -473,7 +475,8 @@ public final class ColumnsExpression
      */
     public void addFunctionsTo(List<Function> functions)
     {
-        collectionElement().addFunctionsTo(functions);
+        if (this.isCollectionElementExpression())
+            collectionElement().addFunctionsTo(functions);
     }
 
     /**
@@ -628,7 +631,7 @@ public final class ColumnsExpression
 
             ElementExpression elementExpression = null;
             if (kind == Kind.ELEMENT)
-                elementExpression = rawElement.prepare(table, identifiers.get(0), type);
+                elementExpression = rawElement.prepare(table, identifiers.get(0));
 
             return new ColumnsExpression(kind, type, columns, elementExpression);
         }

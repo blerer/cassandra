@@ -110,13 +110,6 @@ public final class ElementExpression
     private final ElementExpression.Kind kind;
 
     /**
-     * The type represented by this expression:
-     *  - for a collection element expression the type will be the one of the collection elements
-     *  - for a UDT field expression the type will be the one of the UDT field
-     */
-    private final AbstractType<?> type;
-
-    /**
      * The field identifier in case of {@code UDT_FIELD} expression,
      * {@code null} otherwise.
      */
@@ -128,10 +121,9 @@ public final class ElementExpression
      */
     private final Term collectionElement;
 
-    ElementExpression(ElementExpression.Kind kind, AbstractType<?> type, FieldIdentifier udtField, Term collectionElement)
+    ElementExpression(ElementExpression.Kind kind, FieldIdentifier udtField, Term collectionElement)
     {
         this.kind = kind;
-        this.type = type;
         this.fieldIdentifier = udtField;
         this.collectionElement = collectionElement;
     }
@@ -152,15 +144,6 @@ public final class ElementExpression
     public FieldIdentifier fieldIdentifier()
     {
         return fieldIdentifier;
-    }
-
-    /**
-     * Returns the expression element type.
-     * @return type.
-     */
-    public AbstractType<?> type()
-    {
-        return type;
     }
 
     /**
@@ -235,15 +218,14 @@ public final class ElementExpression
          *
          * @param table      the table schema
          * @param identifier the column identifier
-         * @param type       the column type
          * @return the {@link ElementExpression} resulting from the schema binding
          */
-        ElementExpression prepare(TableMetadata table, ColumnIdentifier identifier, AbstractType<?> type)
+        ElementExpression prepare(TableMetadata table, ColumnIdentifier identifier)
         {
             if (rawCollectionElement != null)
-                return new ElementExpression(Kind.COLLECTION_ELEMENT, type, null, prepareCollectionElement(table, rawCollectionElement, identifier));
+                return new ElementExpression(Kind.COLLECTION_ELEMENT, null, prepareCollectionElement(table, rawCollectionElement, identifier));
 
-            return new ElementExpression(Kind.UDT_FIELD, type, udtField, null);
+            return new ElementExpression(Kind.UDT_FIELD, udtField, null);
         }
 
         private Term prepareCollectionElement(TableMetadata table, Term.Raw rawCollectionElement, ColumnIdentifier identifier)
