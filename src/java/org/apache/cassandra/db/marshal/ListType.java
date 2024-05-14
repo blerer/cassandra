@@ -28,6 +28,7 @@ import java.util.function.Consumer;
 import org.apache.cassandra.cql3.terms.MultiElements;
 import org.apache.cassandra.cql3.terms.Term;
 import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.ListSerializer;
@@ -271,5 +272,24 @@ public class ListType<T> extends CollectionType<List<T>>
             elements.validate(buffer);
         }
         return buffers;
+    }
+
+    @Override
+    protected int compareNextCell(Iterator<Cell<?>> cellIterator, Iterator<ByteBuffer> elementIter)
+    {
+        return getElementsType().compare(cellIterator.next().buffer(), elementIter.next());
+    }
+
+    @Override
+    public boolean contains(ComplexColumnData columnData, ByteBuffer value)
+    {
+        Iterator<Cell<?>> iter = columnData.iterator();
+        while(iter.hasNext())
+        {
+            ByteBuffer cellValue = iter.next().buffer();
+            if(valueComparator().compare(cellValue, value) == 0)
+                return true;
+        }
+        return false;
     }
 }

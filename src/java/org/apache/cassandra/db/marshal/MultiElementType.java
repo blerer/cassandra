@@ -21,6 +21,8 @@ package org.apache.cassandra.db.marshal;
 import java.nio.ByteBuffer;
 import java.util.List;
 
+import org.apache.cassandra.db.rows.ComplexColumnData;
+
 /**
  * Base type for the types being composed of multi-elements like Collections, Tuples, UDTs or Vectors.
  * This class unifies the methods used by the CQL layer to work with those types,
@@ -66,5 +68,7 @@ public abstract class MultiElementType<T> extends AbstractType<T>
      * @return the elements filtered and sorted as they are used for serialization.
      */
     public abstract List<ByteBuffer> filterSortAndValidateElements(List<ByteBuffer> buffers);
+
+    public abstract int compare(ComplexColumnData columnData, List<ByteBuffer> elements);
 }
 

@@ -310,6 +310,7 @@ public class ColumnConditionTest
 
         // LT
         assertFalse(conditionApplies(list(ONE), LT, list(ONE)));
+        assertFalse(conditionApplies(list(), LT, null));
         assertFalse(conditionApplies(list(), LT, list()));
         assertFalse(conditionApplies(list(ONE), LT, list(ZERO)));
         assertTrue(conditionApplies(list(ZERO), LT, list(ONE)));

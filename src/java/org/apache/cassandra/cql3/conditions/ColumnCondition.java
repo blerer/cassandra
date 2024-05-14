@@ -20,11 +20,8 @@ package org.apache.cassandra.cql3.conditions;
 import java.nio.ByteBuffer;
 import java.util.*;
 
-import com.google.common.collect.Iterators;
-
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.Function;
-import org.apache.cassandra.cql3.terms.Constants;
 import org.apache.cassandra.cql3.terms.Lists;
 import org.apache.cassandra.cql3.terms.Maps;
 import org.apache.cassandra.cql3.terms.Term;
@@ -34,7 +31,6 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
@@ -88,14 +84,6 @@ public abstract class ColumnCondition
         return filterUnsetValuesIfNeeded(buffers, ByteBufferUtil.UNSET_BYTE_BUFFER);
     }
 
-    protected final Terms.Terminals bindTerms(QueryOptions options)
-    {
-        Terms.Terminals terminals = terms.bind(options);
-        checkFalse(terminals == null, "Invalid null list in IN condition");
-        checkFalse(terminals == Terms.UNSET_TERMINALS, "Invalid 'unset' value in condition");
-        return Terms.Terminals.of(filterUnsetValuesIfNeeded(terminals.asList(), Constants.UNSET_VALUE));
-    }
-
     private <T> List<T> filterUnsetValuesIfNeeded(List<T> values, T unsetValue)
     {
         if (!operator.isIN())
@@ -123,11 +111,8 @@ public abstract class ColumnCondition
 
         public Bound bind(QueryOptions options)
         {
-            if (column.type.isCollection() && column.type.isMultiCell())
-                return new MultiCellCollectionBound(column, operator, bindTerms(options));
-
-            if (column.type.isUDT() && column.type.isMultiCell())
-                return new MultiCellUdtBound(column, operator, bindAndGetTerms(options), options.getProtocolVersion());
+            if (column.type.isMultiCell())
+                return new MultiCellBound(column, operator, bindAndGetTerms(options));
 
             return new SimpleBound(column, operator, bindAndGetTerms(options));
         }
@@ -160,7 +145,9 @@ public abstract class ColumnCondition
 
         public Bound bind(QueryOptions options)
         {
-            return new ElementAccessBound(column, collectionElement.bindAndGet(options), operator, bindAndGetTerms(options));
+            return new ElementOrFieldAccessBound(column.type instanceof MapType ? Accessor.forMapElement(column, collectionElement.bindAndGet(options))
+                                                                                : Accessor.forListElement(column, collectionElement.bindAndGet(options)),
+                                                 operator, bindAndGetTerms(options));
         }
     }
 
@@ -180,7 +167,7 @@ public abstract class ColumnCondition
 
         public Bound bind(QueryOptions options)
         {
-            return new UDTFieldAccessBound(column, udtField, operator, bindAndGetTerms(options));
+            return new ElementOrFieldAccessBound(Accessor.forUdtField(column, udtField), operator, bindAndGetTerms(options));
         }
     }
 
@@ -217,7 +204,7 @@ public abstract class ColumnCondition
         {
             this.column = column;
             // If the operator is an IN we want to compare the value using an EQ.
-            this.comparisonOperator = operator.isIN() ? Operator.EQ : operator;
+            this.comparisonOperator = operator;
         }
 
         /**
@@ -229,77 +216,6 @@ public abstract class ColumnCondition
         {
             return null;
         }
-
-        /** Returns true if the operator is satisfied (i.e. "otherValue operator value == true"), false otherwise. */
-        protected static boolean compareWithOperator(Operator operator, AbstractType<?> type, ByteBuffer value, ByteBuffer otherValue)
-        {
-            if (value == ByteBufferUtil.UNSET_BYTE_BUFFER)
-                throw invalidRequest("Invalid 'unset' value in condition");
-
-            if (value == null)
-            {
-                switch (operator)
-                {
-                    case EQ:
-                        return otherValue == null;
-                    case NEQ:
-                        return otherValue != null;
-                    default:
-                        throw invalidRequest("Invalid comparison with null for operator \"%s\"", operator);
-                }
-            }
-            else if (otherValue == null)
-            {
-                // the condition value is not null, so only NEQ can return true
-                return operator == Operator.NEQ;
-            }
-            return operator.isSatisfiedBy(type, otherValue, value);
-        }
-    }
-
-    protected static Cell<?> getCell(Row row, ColumnMetadata column)
-    {
-        // If we're asking for a given cell, and we didn't got any row from our read, it's
-        // the same as not having said cell.
-        return row == null ? null : row.getCell(column);
-    }
-
-    protected static Cell<?> getCell(Row row, ColumnMetadata column, CellPath path)
-    {
-        // If we're asking for a given cell, and we didn't got any row from our read, it's
-        // the same as not having said cell.
-        return row == null ? null : row.getCell(column, path);
-    }
-
-    protected static Iterator<Cell<?>> getCells(Row row, ColumnMetadata column)
-    {
-        // If we're asking for a complex cells, and we didn't got any row from our read, it's
-        // the same as not having any cells for that column.
-        if (row == null)
-            return Collections.emptyIterator();
-
-        ComplexColumnData complexData = row.getComplexColumnData(column);
-        return complexData == null ? Collections.<Cell<?>>emptyIterator() : complexData.iterator();
-    }
-
-    protected static boolean evaluateComparisonWithOperator(int comparison, Operator operator)
-    {
-        // called when comparison != 0
-        switch (operator)
-        {
-            case EQ:
-                return false;
-            case LT:
-            case LTE:
-                return comparison < 0;
-            case GT:
-            case GTE:
-                return comparison > 0;
-            case NEQ:
-                return true;
-            default:
-                throw new AssertionError();
-        }
     }
 
     /**
@@ -310,415 +226,89 @@ public abstract class ColumnCondition
         /**
          * The condition values
          */
-        private final List<ByteBuffer> values;
+        private final ByteBuffer value;
 
         private SimpleBound(ColumnMetadata column, Operator operator, List<ByteBuffer> values)
         {
             super(column, operator);
-            this.values = values;
+            this.value = operator.isIN() ? ListType.getInstance(column.type, false).pack(values) : values.get(0);
+            if (value == ByteBufferUtil.UNSET_BYTE_BUFFER)
+                throw invalidRequest("Invalid 'unset' value in condition");
         }
 
         @Override
         public boolean appliesTo(Row row)
         {
-            return isSatisfiedBy(rowValue(row));
+            return comparisonOperator.isSatisfiedBy(column.type, rowValue(row), value);
         }
 
         private ByteBuffer rowValue(Row row)
         {
-            Cell<?> c = getCell(row, column);
-            return c == null ? null : c.buffer();
-        }
+            // If we're asking for a given cell, and we didn't got any row from our read, it's
+            // the same as not having said cell.
+            if (row == null)
+                return null;
 
-        private boolean isSatisfiedBy(ByteBuffer rowValue)
-        {
-            for (ByteBuffer value : values)
-            {
-                if (compareWithOperator(comparisonOperator, column.type, value, rowValue))
-                    return true;
-            }
-            return false;
+            Cell<?> c = row.getCell(column);
+            return c == null ? null : c.buffer();
         }
     }
 
     /**
      * A condition on an element of a collection column.
      */
-    private static final class ElementAccessBound extends Bound
+    private static final class ElementOrFieldAccessBound extends Bound
     {
         /**
          * The collection element
          */
-        private final ByteBuffer collectionElement;
+        private final Accessor elementAccessor;
 
         /**
          * The conditions values.
          */
-        private final List<ByteBuffer> values;
+        private final ByteBuffer value;
 
-        private ElementAccessBound(ColumnMetadata column,
-                                   ByteBuffer collectionElement,
-                                   Operator operator,
-                                   List<ByteBuffer> values)
+        private ElementOrFieldAccessBound(Accessor elementAccessor,
+                                          Operator operator,
+                                          List<ByteBuffer> values)
         {
-            super(column, operator);
-
-            this.collectionElement = collectionElement;
-            this.values = values;
+            super(null, operator);
+            this.elementAccessor = elementAccessor;
+            this.value = operator.isIN() ? ListType.getInstance(elementAccessor.type(), false).pack(values)
+                                         : values.get(0);
+            if (value == ByteBufferUtil.UNSET_BYTE_BUFFER)
+                throw invalidRequest("Invalid 'unset' value in condition");
         }
 
         @Override
         public boolean appliesTo(Row row)
         {
-            boolean isMap = column.type instanceof MapType;
-
-            if (collectionElement == null)
-                throw invalidRequest("Invalid null value for %s element access", isMap ? "map" : "list");
-
-            if (isMap)
-            {
-                MapType<?, ?> mapType = (MapType<?, ?>) column.type;
-                ByteBuffer rowValue = rowMapValue(mapType, row);
-                return isSatisfiedBy(mapType.getKeysType(), rowValue);
-            }
-
-            ListType<?> listType = (ListType<?>) column.type;
-            ByteBuffer rowValue = rowListValue(listType, row);
-            return isSatisfiedBy(listType.getElementsType(), rowValue);
-        }
-
-        private ByteBuffer rowMapValue(MapType<?, ?> type, Row row)
-        {
-            if (column.type.isMultiCell())
-            {
-                Cell<?> cell = getCell(row, column, CellPath.create(collectionElement));
-                return cell == null ? null : cell.buffer();
-            }
-
-            Cell<?> cell = getCell(row, column);
-            return cell == null
-                    ? null
-                    : type.getSerializer().getSerializedValue(cell.buffer(), collectionElement, type.getKeysType());
-        }
-
-        private ByteBuffer rowListValue(ListType<?> type, Row row)
-        {
-            if (column.type.isMultiCell())
-                return cellValueAtIndex(getCells(row, column), getListIndex(collectionElement));
-
-            Cell<?> cell = getCell(row, column);
-            return cell == null
-                    ? null
-                    : type.getSerializer().getElement(cell.buffer(), getListIndex(collectionElement));
-        }
-
-        private static ByteBuffer cellValueAtIndex(Iterator<Cell<?>> iter, int index)
-        {
-            int adv = Iterators.advance(iter, index);
-            if (adv == index && iter.hasNext())
-                return iter.next().buffer();
-
-            return null;
-        }
-
-        private boolean isSatisfiedBy(AbstractType<?> valueType, ByteBuffer rowValue)
-        {
-            for (ByteBuffer value : values)
-            {
-                if (compareWithOperator(comparisonOperator, valueType, value, rowValue))
-                    return true;
-            }
-            return false;
-        }
-
-        @Override
-        public ByteBuffer getCollectionElementValue()
-        {
-            return collectionElement;
-        }
-
-        private static int getListIndex(ByteBuffer collectionElement)
-        {
-            int idx = ByteBufferUtil.toInt(collectionElement);
-            checkFalse(idx < 0, "Invalid negative list index %d", idx);
-            return idx;
+            return comparisonOperator.isSatisfiedBy(elementAccessor.type(), elementAccessor.elementValue(row), value);
         }
     }
 
     /**
-     * A condition on an entire collection column.
+     * A condition on a multicell column.
      */
-    private static final class MultiCellCollectionBound extends Bound
+    private static final class MultiCellBound extends Bound
     {
-        private final Terms.Terminals values;
+        private final ByteBuffer value;
 
-        public MultiCellCollectionBound(ColumnMetadata column, Operator operator, Terms.Terminals values)
+        public MultiCellBound(ColumnMetadata column, Operator operator, List<ByteBuffer> values)
         {
             super(column, operator);
             assert column.type.isMultiCell();
-            this.values = values;
+            this.value = operator.isIN() ? ListType.getInstance(column.type, false).pack(values)
+                                         : values.get(0);
+            if (value == ByteBufferUtil.UNSET_BYTE_BUFFER)
+                throw invalidRequest("Invalid 'unset' value in condition");
         }
 
         public boolean appliesTo(Row row)
         {
-            CollectionType<?> type = (CollectionType<?>) column.type;
-
-            // copy iterator contents so that we can properly reuse them for each comparison with an IN value
-            for (Term.Terminal value : values.asList())
-            {
-                Iterator<Cell<?>> iter = getCells(row, column);
-                if (value == null)
-                {
-                    if (comparisonOperator == Operator.EQ)
-                    {
-                        if (!iter.hasNext())
-                            return true;
-                        continue;
-                    }
-
-                    if (comparisonOperator == Operator.NEQ)
-                        return iter.hasNext();
-
-                    throw invalidRequest("Invalid comparison with null for operator \"%s\"", comparisonOperator);
-                }
-
-                if (valueAppliesTo(type, iter, value, comparisonOperator))
-                    return true;
-            }
-            return false;
-        }
-
-        private static boolean valueAppliesTo(CollectionType<?> type, Iterator<Cell<?>> iter, Term.Terminal value, Operator operator)
-        {
-            if (value == null)
-                return !iter.hasNext();
-
-            if(operator == Operator.CONTAINS || operator == Operator.CONTAINS_KEY)
-                return containsAppliesTo(type, iter, value.get(), operator);
-
-            switch (type.kind)
-            {
-                case LIST:
-                    return listAppliesTo((ListType<?>)type, iter, value.getElements(), operator);
-                case SET:
-                    return setAppliesTo((SetType<?>)type, iter, value.getElements(), operator);
-                case MAP:
-                    return mapAppliesTo((MapType<?, ?>)type, iter, value.getElements(), operator);
-            }
-            throw new AssertionError();
-        }
-
-        private static boolean setOrListAppliesTo(AbstractType<?> type, Iterator<Cell<?>> iter, Iterator<ByteBuffer> conditionIter, Operator operator, boolean isSet)
-        {
-            while(iter.hasNext())
-            {
-                if (!conditionIter.hasNext())
-                    return (operator == Operator.GT) || (operator == Operator.GTE) || (operator == Operator.NEQ);
-
-                // for lists we use the cell value; for sets we use the cell name
-                ByteBuffer cellValue = isSet ? iter.next().path().get(0) : iter.next().buffer();
-                int comparison = type.compare(cellValue, conditionIter.next());
-                if (comparison != 0)
-                    return evaluateComparisonWithOperator(comparison, operator);
-            }
-
-            if (conditionIter.hasNext())
-                return (operator == Operator.LT) || (operator == Operator.LTE) || (operator == Operator.NEQ);
-
-            // they're equal
-            return operator == Operator.EQ || operator == Operator.LTE || operator == Operator.GTE;
-        }
-
-        private static boolean listAppliesTo(ListType<?> type, Iterator<Cell<?>> iter, List<ByteBuffer> elements, Operator operator)
-        {
-            return setOrListAppliesTo(type.getElementsType(), iter, elements.iterator(), operator, false);
-        }
-
-        private static boolean setAppliesTo(SetType<?> type, Iterator<Cell<?>> iter, List<ByteBuffer> elements, Operator operator)
-        {
-            // The elements are alread sorted as expected by the SetType
-            return setOrListAppliesTo(type.getElementsType(), iter, elements.iterator(), operator, true);
-        }
-
-        private static boolean mapAppliesTo(MapType<?, ?> type, Iterator<Cell<?>> iter, List<ByteBuffer> elements, Operator operator)
-        {
-            Iterator<ByteBuffer> conditionIter = elements.iterator();
-            while(iter.hasNext())
-            {
-                if (!conditionIter.hasNext())
-                    return (operator == Operator.GT) || (operator == Operator.GTE) || (operator == Operator.NEQ);
-
-                ByteBuffer key = conditionIter.next();
-                ByteBuffer value = conditionIter.next();
-                Cell<?> c = iter.next();
-
-                // compare the keys
-                int comparison = type.getKeysType().compare(c.path().get(0), key);
-                if (comparison != 0)
-                    return evaluateComparisonWithOperator(comparison, operator);
-
-                // compare the values
-                comparison = type.getValuesType().compare(c.buffer(), value);
-                if (comparison != 0)
-                    return evaluateComparisonWithOperator(comparison, operator);
-            }
-
-            if (conditionIter.hasNext())
-                return (operator == Operator.LT) || (operator == Operator.LTE) || (operator == Operator.NEQ);
-
-            // they're equal
-            return operator == Operator.EQ || operator == Operator.LTE || operator == Operator.GTE;
-        }
-    }
-
-    private static boolean containsAppliesTo(CollectionType<?> type, Iterator<Cell<?>> iter, ByteBuffer value, Operator operator)
-    {
-        AbstractType<?> compareType;
-        switch (type.kind)
-        {
-            case LIST:
-                compareType = ((ListType<?>)type).getElementsType();
-                break;
-            case SET:
-                compareType = ((SetType<?>)type).getElementsType();
-                break;
-            case MAP:
-                compareType = operator == Operator.CONTAINS_KEY ? ((MapType<?, ?>)type).getKeysType() : ((MapType<?, ?>)type).getValuesType();
-                break;
-            default:
-                throw new AssertionError();
-        }
-        boolean appliesToSetOrMapKeys = (type.kind == CollectionType.Kind.SET || type.kind == CollectionType.Kind.MAP && operator == Operator.CONTAINS_KEY);
-        return containsAppliesTo(compareType, iter, value, appliesToSetOrMapKeys);
-    }
-
-    private static boolean containsAppliesTo(AbstractType<?> type, Iterator<Cell<?>> iter, ByteBuffer value, Boolean appliesToSetOrMapKeys)
-    {
-        while(iter.hasNext())
-        {
-            // for lists and map values we use the cell value; for sets and map keys we use the cell name
-            ByteBuffer cellValue = appliesToSetOrMapKeys ? iter.next().path().get(0) : iter.next().buffer();
-            if(type.compare(cellValue, value) == 0)
-                return true;
-        }
-        return false;
-    }
-
-    /**
-     * A condition on a UDT field
-     */
-    private static final class UDTFieldAccessBound extends Bound
-    {
-        /**
-         * The UDT field.
-         */
-        private final FieldIdentifier field;
-
-        /**
-         * The conditions values.
-         */
-        private final List<ByteBuffer> values;
-
-        private UDTFieldAccessBound(ColumnMetadata column, FieldIdentifier field, Operator operator, List<ByteBuffer> values)
-        {
-            super(column, operator);
-            assert column.type.isUDT() && field != null;
-            this.field = field;
-            this.values = values;
-        }
-
-        @Override
-        public boolean appliesTo(Row row)
-        {
-            return isSatisfiedBy(rowValue(row));
-        }
-
-        private ByteBuffer rowValue(Row row)
-        {
-            UserType userType = (UserType) column.type;
-
-            if (column.type.isMultiCell())
-            {
-                Cell<?> cell = getCell(row, column, userType.cellPathForField(field));
-                return cell == null ? null : cell.buffer();
-            }
-
-            Cell<?> cell = getCell(row, column);
-            return cell == null
-                   ? null
-                   : userType.unpack(cell.buffer()).get(userType.fieldPosition(field));
-        }
-
-        private boolean isSatisfiedBy(ByteBuffer rowValue)
-        {
-            UserType userType = (UserType) column.type;
-            int fieldPosition = userType.fieldPosition(field);
-            AbstractType<?> valueType = userType.fieldType(fieldPosition);
-            for (ByteBuffer value : values)
-            {
-                if (compareWithOperator(comparisonOperator, valueType, value, rowValue))
-                    return true;
-            }
-            return false;
-        }
-        
-        @Override
-        public String toString()
-        {
-            return ToStringBuilder.reflectionToString(this, ToStringStyle.SHORT_PREFIX_STYLE);
-        }
-    }
-
-    /**
-     * A condition on an entire UDT.
-     */
-    private static final class MultiCellUdtBound extends Bound
-    {
-        /**
-         * The conditions values.
-         */
-        private final List<ByteBuffer> values;
-
-        /**
-         * The protocol version
-         */
-        private final ProtocolVersion protocolVersion;
-
-        private MultiCellUdtBound(ColumnMetadata column, Operator op, List<ByteBuffer> values, ProtocolVersion protocolVersion)
-        {
-            super(column, op);
-            assert column.type.isMultiCell();
-            this.values = values;
-            this.protocolVersion = protocolVersion;
-        }
-
-        @Override
-        public boolean appliesTo(Row row)
-        {
-            return isSatisfiedBy(rowValue(row));
-        }
-
-        private final ByteBuffer rowValue(Row row)
-        {
-            UserType userType = (UserType) column.type;
-            Iterator<Cell<?>> iter = getCells(row, column);
-            return iter.hasNext() ? userType.serializeForNativeProtocol(iter, protocolVersion) : null;
-        }
-
-        private boolean isSatisfiedBy(ByteBuffer rowValue)
-        {
-            for (ByteBuffer value : values)
-            {
-                if (compareWithOperator(comparisonOperator, column.type, value, rowValue))
-                    return true;
-            }
-            return false;
-        }
-        
-        @Override
-        public String toString()
-        {
-            return ToStringBuilder.reflectionToString(this, ToStringStyle.SHORT_PREFIX_STYLE);
+            MultiElementType<?> type = (MultiElementType<?>) column.type;
+            return comparisonOperator.isSatisfiedBy(type, row == null ? null : row.getComplexColumnData(column), value);
         }
     }
 
@@ -866,6 +456,130 @@ public abstract class ColumnCondition
         public String toString()
         {
             return ToStringBuilder.reflectionToString(this, ToStringStyle.SHORT_PREFIX_STYLE);
+        }
+    }
+
+    private interface Accessor
+    {
+        AbstractType<?> type();
+
+        ByteBuffer elementValue(Row row);
+
+        static Accessor forUdtField(ColumnMetadata column, FieldIdentifier field)
+        {
+            final UserType udtType = (UserType) column.type;
+            final AbstractType<?> elementType = udtType.type(udtType.fieldPosition(field));
+            return new Accessor()
+            {
+                @Override
+                public AbstractType<?> type()
+                {
+                    return elementType;
+                }
+
+                @Override
+                public ByteBuffer elementValue(Row row)
+                {
+                    if (row == null)
+                        return null;
+
+                    ColumnData data = row.getColumnData(column);
+
+                    if (data == null)
+                        return null;
+
+                    if (column.type.isMultiCell())
+                    {
+                        Cell<?> cell = ((ComplexColumnData) data).getCell(udtType.cellPathForField(field));
+                        return cell == null ? null : cell.buffer();
+                    }
+
+                    return udtType.unpack(((Cell<?>) data).buffer()).get(udtType.fieldPosition(field));
+                }
+            };
+        }
+
+        static Accessor forListElement(ColumnMetadata column, ByteBuffer index)
+        {
+            checkNotNull(index, "Invalid null value for list element access");
+            final ListType<?> listType = (ListType<?>) column.type;
+            return new Accessor()
+            {
+                @Override
+                public AbstractType<?> type()
+                {
+                    return listType.getElementsType();
+                }
+
+                @Override
+                public ByteBuffer elementValue(Row row)
+                {
+                    if (row == null)
+                        return null;
+
+                    ColumnData data = row.getColumnData(column);
+
+                    if (data == null)
+                        return null;
+
+                    int idx = getListIndex(index);
+
+                    if (column.type.isMultiCell())
+                    {
+                        ComplexColumnData complexColumnData = (ComplexColumnData) data;
+
+                        if (idx >= complexColumnData.cellsCount())
+                            return null;
+
+                        Cell<?> cell = complexColumnData.getCellByIndex(idx);
+                        return cell == null ? null : cell.buffer();
+                    }
+
+                    List<ByteBuffer> cells = listType.unpack(((Cell<?>) data).buffer());
+                    return idx >= cells.size() ? null : cells.get(idx);
+                }
+
+                private int getListIndex(ByteBuffer index)
+                {
+                    int idx = ByteBufferUtil.toInt(index);
+                    checkFalse(idx < 0, "Invalid negative list index %d", idx);
+                    return idx;
+                }
+            };
+        }
+
+        static Accessor forMapElement(ColumnMetadata column, ByteBuffer key)
+        {
+            checkNotNull(key, "Invalid null value for map element access");
+            final MapType<?, ?> mapType = (MapType<?, ?>) column.type;
+            return new Accessor()
+            {
+                @Override
+                public AbstractType<?> type()
+                {
+                    return mapType.getValuesType();
+                }
+
+                @Override
+                public ByteBuffer elementValue(Row row)
+                {
+                    if (row == null)
+                        return null;
+
+                    ColumnData data = row.getColumnData(column);
+
+                    if (data == null)
+                        return null;
+
+                    if (column.type.isMultiCell())
+                    {
+                        Cell<?> cell = ((ComplexColumnData) data).getCell(CellPath.create(key));
+                        return cell == null ? null : cell.buffer();
+                    }
+
+                    return mapType.getSerializer().getSerializedValue(((Cell<?>) data).buffer(), key, type());
+                }
+            };
         }
     }
 }
