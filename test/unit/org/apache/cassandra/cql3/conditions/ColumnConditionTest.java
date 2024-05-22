@@ -321,13 +321,14 @@ public class ColumnConditionTest
 
         // LT
         assertFalse(conditionApplies(list(ONE), LT, list(ONE)));
+        assertThrowsIRE(() -> conditionApplies(list(), LT, null), "Invalid comparison with null for operator \"<\"");
         assertFalse(conditionApplies(list(), LT, list()));
         assertFalse(conditionApplies(list(ONE), LT, list(ZERO)));
         assertTrue(conditionApplies(list(ZERO), LT, list(ONE)));
         assertFalse(conditionApplies(list(ONE, ONE), LT, list(ONE)));
         assertTrue(conditionApplies(list(ONE), LT, list(ONE, ONE)));
         assertFalse(conditionApplies(list(ONE), LT, list()));
-        assertTrue(conditionApplies(list(), LT, list(ONE)));
+        assertFalse(conditionApplies(list(), LT, list(ONE)));
 
         assertFalse(conditionApplies(list(ONE), LT, list(ByteBufferUtil.EMPTY_BYTE_BUFFER)));
         assertTrue(conditionApplies(list(ByteBufferUtil.EMPTY_BYTE_BUFFER), LT, list(ONE)));
@@ -335,13 +336,13 @@ public class ColumnConditionTest
 
         // LTE
         assertTrue(conditionApplies(list(ONE), LTE, list(ONE)));
-        assertTrue(conditionApplies(list(), LTE, list()));
+        assertFalse(conditionApplies(list(), LTE, list()));
         assertFalse(conditionApplies(list(ONE), LTE, list(ZERO)));
         assertTrue(conditionApplies(list(ZERO), LTE, list(ONE)));
         assertFalse(conditionApplies(list(ONE, ONE), LTE, list(ONE)));
         assertTrue(conditionApplies(list(ONE), LTE, list(ONE, ONE)));
         assertFalse(conditionApplies(list(ONE), LTE, list()));
-        assertTrue(conditionApplies(list(), LTE, list(ONE)));
+        assertFalse(conditionApplies(list(), LTE, list(ONE)));
 
         assertFalse(conditionApplies(list(ONE), LTE, list(ByteBufferUtil.EMPTY_BYTE_BUFFER)));
         assertTrue(conditionApplies(list(ByteBufferUtil.EMPTY_BYTE_BUFFER), LTE, list(ONE)));
@@ -363,7 +364,7 @@ public class ColumnConditionTest
 
         // GTE
         assertTrue(conditionApplies(list(ONE), GTE, list(ONE)));
-        assertTrue(conditionApplies(list(), GTE, list()));
+        assertFalse(conditionApplies(list(), GTE, list()));
         assertTrue(conditionApplies(list(ONE), GTE, list(ZERO)));
         assertFalse(conditionApplies(list(ZERO), GTE, list(ONE)));
         assertTrue(conditionApplies(list(ONE, ONE), GTE, list(ONE)));
@@ -430,7 +431,7 @@ public class ColumnConditionTest
         assertFalse(conditionApplies(set(ONE, TWO), LT, set(ONE)));
         assertTrue(conditionApplies(set(ONE), LT, set(ONE, TWO)));
         assertFalse(conditionApplies(set(ONE), LT, set()));
-        assertTrue(conditionApplies(set(), LT, set(ONE)));
+        assertFalse(conditionApplies(set(), LT, set(ONE)));
 
         assertFalse(conditionApplies(set(ONE), LT, set(ByteBufferUtil.EMPTY_BYTE_BUFFER)));
         assertTrue(conditionApplies(set(ByteBufferUtil.EMPTY_BYTE_BUFFER), LT, set(ONE)));
@@ -438,13 +439,13 @@ public class ColumnConditionTest
 
         // LTE
         assertTrue(conditionApplies(set(ONE), LTE, set(ONE)));
-        assertTrue(conditionApplies(set(), LTE, set()));
+        assertFalse(conditionApplies(set(), LTE, set()));
         assertFalse(conditionApplies(set(ONE), LTE, set(ZERO)));
         assertTrue(conditionApplies(set(ZERO), LTE, set(ONE)));
         assertFalse(conditionApplies(set(ONE, TWO), LTE, set(ONE)));
         assertTrue(conditionApplies(set(ONE), LTE, set(ONE, TWO)));
         assertFalse(conditionApplies(set(ONE), LTE, set()));
-        assertTrue(conditionApplies(set(), LTE, set(ONE)));
+        assertFalse(conditionApplies(set(), LTE, set(ONE)));
 
         assertFalse(conditionApplies(set(ONE), LTE, set(ByteBufferUtil.EMPTY_BYTE_BUFFER)));
         assertTrue(conditionApplies(set(ByteBufferUtil.EMPTY_BYTE_BUFFER), LTE, set(ONE)));
@@ -466,7 +467,7 @@ public class ColumnConditionTest
 
         // GTE
         assertTrue(conditionApplies(set(ONE), GTE, set(ONE)));
-        assertTrue(conditionApplies(set(), GTE, set()));
+        assertFalse(conditionApplies(set(), GTE, set()));
         assertTrue(conditionApplies(set(ONE), GTE, set(ZERO)));
         assertFalse(conditionApplies(set(ZERO), GTE, set(ONE)));
         assertTrue(conditionApplies(set(ONE, TWO), GTE, set(ONE)));
@@ -548,7 +549,7 @@ public class ColumnConditionTest
         assertFalse(conditionApplies(map(ONE, ONE, TWO, ONE), LT, map(ONE, ONE)));
         assertTrue(conditionApplies(map(ONE, ONE), LT, map(ONE, ONE, TWO, ONE)));
         assertFalse(conditionApplies(map(ONE, ONE), LT, map()));
-        assertTrue(conditionApplies(map(), LT, map(ONE, ONE)));
+        assertFalse(conditionApplies(map(), LT, map(ONE, ONE)));
 
         assertFalse(conditionApplies(map(ONE, ONE), LT, map(ByteBufferUtil.EMPTY_BYTE_BUFFER, ONE)));
         assertTrue(conditionApplies(map(ByteBufferUtil.EMPTY_BYTE_BUFFER, ONE), LT, map(ONE, ONE)));
@@ -559,7 +560,7 @@ public class ColumnConditionTest
 
         // LTE
         assertTrue(conditionApplies(map(ONE, ONE), LTE, map(ONE, ONE)));
-        assertTrue(conditionApplies(map(), LTE, map()));
+        assertFalse(conditionApplies(map(), LTE, map()));
         assertFalse(conditionApplies(map(ONE, ONE), LTE, map(ZERO, ONE)));
         assertTrue(conditionApplies(map(ZERO, ONE), LTE, map(ONE, ONE)));
         assertFalse(conditionApplies(map(ONE, ONE), LTE, map(ONE, ZERO)));
@@ -567,7 +568,7 @@ public class ColumnConditionTest
         assertFalse(conditionApplies(map(ONE, ONE, TWO, ONE), LTE, map(ONE, ONE)));
         assertTrue(conditionApplies(map(ONE, ONE), LTE, map(ONE, ONE, TWO, ONE)));
         assertFalse(conditionApplies(map(ONE, ONE), LTE, map()));
-        assertTrue(conditionApplies(map(), LTE, map(ONE, ONE)));
+        assertFalse(conditionApplies(map(), LTE, map(ONE, ONE)));
 
         assertFalse(conditionApplies(map(ONE, ONE), LTE, map(ByteBufferUtil.EMPTY_BYTE_BUFFER, ONE)));
         assertTrue(conditionApplies(map(ByteBufferUtil.EMPTY_BYTE_BUFFER, ONE), LTE, map(ONE, ONE)));
@@ -597,7 +598,7 @@ public class ColumnConditionTest
 
         // GTE
         assertTrue(conditionApplies(map(ONE, ONE), GTE, map(ONE, ONE)));
-        assertTrue(conditionApplies(map(), GTE, map()));
+        assertFalse(conditionApplies(map(), GTE, map()));
         assertTrue(conditionApplies(map(ONE, ONE), GTE, map(ZERO, ONE)));
         assertFalse(conditionApplies(map(ZERO, ONE), GTE, map(ONE, ONE)));
         assertTrue(conditionApplies(map(ONE, ONE), GTE, map(ONE, ZERO)));
