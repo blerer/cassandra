@@ -59,7 +59,7 @@ public final class ColumnCondition
      */
     private final Terms values;
 
-    private ColumnCondition(ColumnsExpression columnsExpression, Operator operator, Terms values)
+    public ColumnCondition(ColumnsExpression columnsExpression, Operator operator, Terms values)
     {
         this.columnsExpression = columnsExpression;
         this.operator = operator;
@@ -106,37 +106,32 @@ public final class ColumnCondition
     {
         ColumnMetadata column = columnsExpression.firstColumn();
         if (column.type.isMultiCell())
-            return new MultiCellBound(column, operator, bindAndGetTerms(options));
+            return new MultiCellBound(column, operator, toValue(column.type, bindAndGetTerms(options)));
 
-        return new SimpleBound(column, operator, bindAndGetTerms(options));
+        return new SimpleBound(column, operator, toValue(column.type, bindAndGetTerms(options)));
     }
 
     private ColumnCondition.Bound bindElement(QueryOptions options)
     {
-        switch (columnsExpression.elementKind())
+        ColumnMetadata column = columnsExpression.firstColumn();
+        ByteBuffer keyOrIndex = columnsExpression.element().bindAndGet(options);
+        if (column.type.isCollection())
         {
-            case UDT_FIELD:
-                return bindUdtField(options);
-            case COLLECTION_ELEMENT:
-                return bindCollectionElement(options);
-            default:
-                throw new UnsupportedOperationException();
+            checkNotNull(keyOrIndex, "Invalid null value for %s element access", column.type instanceof MapType ? "map" : "list");
         }
-
+        return new ElementOrFieldAccessBound(column, keyOrIndex, operator, toValue(columnsExpression.type(), bindAndGetTerms(options)));
     }
 
-    private Bound bindCollectionElement(QueryOptions options)
+    private ByteBuffer toValue(AbstractType<?> type, List<ByteBuffer> values)
     {
-        ColumnMetadata column = columnsExpression.firstColumn();
-        ByteBuffer element = columnsExpression.collectionElement().bindAndGet(options);
-        return new ElementOrFieldAccessBound(column, element, operator, bindAndGetTerms(options));
-    }
+        if (operator.isIN())
+            return ListType.getInstance(type, false).pack(values);
 
-    private Bound bindUdtField(QueryOptions options)
-    {
-        ColumnMetadata column = columnsExpression.firstColumn();
-        ByteBuffer element = columnsExpression.udtField().bytes;
-        return new ElementOrFieldAccessBound(column, element, operator, bindAndGetTerms(options));
+        ByteBuffer value = values.get(0);
+        if (value == ByteBufferUtil.UNSET_BYTE_BUFFER)
+            throw invalidRequest("Invalid 'unset' value in condition");
+
+        return value;
     }
 
     private List<ByteBuffer> bindAndGetTerms(QueryOptions options)
@@ -162,42 +157,17 @@ public final class ColumnCondition
         return filtered;
     }
 
-    /**
-     *  A regular column, simple condition.
-     */
-    public static ColumnCondition simpleColumnCondition(ColumnsExpression column, Operator op, Terms terms)
-    {
-        assert column.element() == null;
-        return new ColumnCondition(column, op, terms);
-    }
-
-    /**
-     * A collection column, simple condition.
-     */
-    public static ColumnCondition collectionColumnCondition(ColumnsExpression column, Operator op, Terms terms)
-    {
-        assert column.isCollectionElementExpression() : "Column must be a collection element expression";
-        return new ColumnCondition(column, op, terms);
-    }
-
-    /**
-     * A UDT column, simple condition.
-     */
-    public static ColumnCondition udtFieldCondition(ColumnsExpression column, Operator op, Terms terms)
-    {
-        assert column.isUDTFieldElementExpression() : "Column must be a UDT field element expression";
-        return new ColumnCondition(column, op, terms);
-    }
-
     public static abstract class Bound
     {
-        public final ColumnMetadata column;
-        public final Operator operator;
+        protected final ColumnMetadata column;
+        protected final Operator operator;
+        protected final ByteBuffer value;
 
-        protected Bound(ColumnMetadata column, Operator operator)
+        protected Bound(ColumnMetadata column, Operator operator, ByteBuffer value)
         {
             this.column = column;
             this.operator = operator;
+            this.value = value;
         }
 
         /**
@@ -211,17 +181,9 @@ public final class ColumnCondition
      */
     private static final class SimpleBound extends Bound
     {
-        /**
-         * The condition values
-         */
-        private final ByteBuffer value;
-
-        private SimpleBound(ColumnMetadata column, Operator operator, List<ByteBuffer> values)
+        private SimpleBound(ColumnMetadata column, Operator operator, ByteBuffer value)
         {
-            super(column, operator);
-            this.value = operator.isIN() ? ListType.getInstance(column.type, false).pack(values) : values.get(0);
-            if (value == ByteBufferUtil.UNSET_BYTE_BUFFER)
-                throw invalidRequest("Invalid 'unset' value in condition");
+            super(column, operator, value);
         }
 
         @Override
@@ -254,27 +216,15 @@ public final class ColumnCondition
          */
         private final ByteBuffer keyOrIndex;
 
-        /**
-         * The conditions values.
-         */
-        private final ByteBuffer value;
 
         private ElementOrFieldAccessBound(ColumnMetadata column,
                                           ByteBuffer keyOrIndex,
                                           Operator operator,
-                                          List<ByteBuffer> values)
+                                          ByteBuffer value)
         {
-            super(column, operator);
+            super(column, operator, value);
             this.elementType = ((MultiElementType<?>) column.type).elementType(keyOrIndex);
             this.keyOrIndex = keyOrIndex;
-            if (column.type.isCollection())
-            {
-                checkNotNull(keyOrIndex, "Invalid null value for %s element access", column.type instanceof MapType ? "map" : "list");
-            }
-            this.value = operator.isIN() ? ListType.getInstance(elementType, false).pack(values)
-                                         : values.get(0);
-            if (value == ByteBufferUtil.UNSET_BYTE_BUFFER)
-                throw invalidRequest("Invalid 'unset' value in condition");
         }
 
         @Override
@@ -295,16 +245,10 @@ public final class ColumnCondition
      */
     private static final class MultiCellBound extends Bound
     {
-        private final ByteBuffer value;
-
-        public MultiCellBound(ColumnMetadata column, Operator operator, List<ByteBuffer> values)
+        public MultiCellBound(ColumnMetadata column, Operator operator, ByteBuffer value)
         {
-            super(column, operator);
+            super(column, operator, value);
             assert column.type.isMultiCell();
-            this.value = operator.isIN() ? ListType.getInstance(column.type, false).pack(values)
-                                         : values.get(0);
-            if (value == ByteBufferUtil.UNSET_BYTE_BUFFER)
-                throw invalidRequest("Invalid 'unset' value in condition");
         }
 
         public boolean appliesTo(Row row)
@@ -368,7 +312,13 @@ public final class ColumnCondition
         public ColumnCondition prepare(TableMetadata table)
         {
             ColumnsExpression expression = rawExpressions.prepare(table);
+            ColumnSpecification receiver = receiver(table, expression);
+            validateOperationOnDurations(receiver.type);
+            return new ColumnCondition(expression, operator, prepareTerms(table.keyspace, receiver));
+        }
 
+        private ColumnSpecification receiver(TableMetadata table, ColumnsExpression expression)
+        {
             ColumnMetadata receiver = table.getExistingColumn(column());
             checkFalse(receiver.isPrimaryKeyColumn(), "PRIMARY KEY column '%s' cannot have IF conditions", receiver.name);
 
@@ -380,42 +330,26 @@ public final class ColumnCondition
                 switch (expression.elementKind())
                 {
                     case COLLECTION_ELEMENT:
-                        if (!(receiver.type.isCollection()))
-                            throw invalidRequest("Invalid element access syntax for non-collection column %s", receiver.name);
-
-                        ColumnSpecification valueSpec;
                         switch ((((CollectionType<?>) receiver.type).kind))
                         {
                             case LIST:
-                                valueSpec = Lists.valueSpecOf(receiver);
-                                break;
+                                return Lists.valueSpecOf(receiver);
                             case MAP:
-                                valueSpec = Maps.valueSpecOf(receiver);
-                                break;
+                                return Maps.valueSpecOf(receiver);
                             case SET:
                                 throw invalidRequest("Invalid element access syntax for set column %s", receiver.name);
                             default:
                                 throw new AssertionError();
                         }
 
-                        validateOperationOnDurations(valueSpec.type);
-                        return collectionColumnCondition(expression, operator, prepareTerms(table.keyspace, valueSpec));
-
                     case UDT_FIELD:
-                        UserType userType = (UserType) receiver.type;
-                        int fieldPosition = userType.fieldPosition(udtField);
-                        if (fieldPosition == -1)
-                            throw invalidRequest("Unknown field %s for column %s", udtField, receiver.name);
-
-                        ColumnSpecification fieldReceiver = UserTypes.fieldSpecOf(receiver, fieldPosition);
-                        validateOperationOnDurations(fieldReceiver.type);
-                        return ColumnCondition.udtFieldCondition(expression, operator, prepareTerms(table.keyspace, fieldReceiver));
+                        int fieldPosition = ((UserType) receiver.type).fieldPosition(udtField);
+                        return UserTypes.fieldSpecOf(receiver, fieldPosition);
                 }
             }
-
-            validateOperationOnDurations(receiver.type);
-            return simpleColumnCondition(expression, operator, prepareTerms(table.keyspace, receiver));
+            return receiver;
         }
+
 
         private Terms prepareTerms(String keyspace, ColumnSpecification receiver)
         {
@@ -423,7 +357,6 @@ public final class ColumnCondition
                        "Cannot use CONTAINS KEY on non-map column %s", receiver.name);
             checkFalse(operator == Operator.CONTAINS && !(receiver.type.isCollection()),
                        "Cannot use CONTAINS on non-collection column %s", receiver.name);
-
 
             if (operator == Operator.CONTAINS || operator == Operator.CONTAINS_KEY)
                 receiver = ((CollectionType<?>) receiver.type).makeCollectionReceiver(receiver, operator == Operator.CONTAINS_KEY);

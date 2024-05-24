@@ -58,6 +58,7 @@ public enum Operator
         @Override
         public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
+            // Legacy behavior of LWT conditions
             if (leftOperand == null || rightOperand == null)
                 return leftOperand == rightOperand;
 
@@ -67,6 +68,7 @@ public enum Operator
         @Override
         public boolean isSatisfiedBy(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
         {
+            // Legacy behavior of LWT conditions
             if (rightOperand == null)
                 return leftOperand == null;
 
@@ -457,6 +459,7 @@ public enum Operator
         @Override
         public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
+            // Legacy behavior of LWT conditions
             if (leftOperand == null || rightOperand == null)
             {
                 return leftOperand != rightOperand;
@@ -468,6 +471,7 @@ public enum Operator
         @Override
         public boolean isSatisfiedBy(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
         {
+            // Legacy behavior of LWT conditions
             if (rightOperand == null)
                 return leftOperand != null;
 

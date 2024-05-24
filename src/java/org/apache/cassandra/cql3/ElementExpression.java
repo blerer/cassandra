@@ -22,6 +22,8 @@ import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Objects;
 
+import org.apache.cassandra.cql3.functions.Function;
+import org.apache.cassandra.cql3.terms.Constants;
 import org.apache.cassandra.cql3.terms.Lists;
 import org.apache.cassandra.cql3.terms.Maps;
 import org.apache.cassandra.cql3.terms.Term;
@@ -29,8 +31,6 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
@@ -53,17 +53,6 @@ public final class ElementExpression
         UDT_FIELD
         {
             @Override
-            public AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, ElementExpression.Raw element)
-            {
-                UserType userType = (UserType) columns.get(0).type;
-                int fieldPosition = userType.fieldPosition(element.udtField);
-                if (fieldPosition == -1)
-                    throw invalidRequest("Unknown field " + element.udtField + " for UDT " + columns.get(0).name);
-
-                return userType.fieldType(fieldPosition);
-            }
-
-            @Override
             public String toCQLString(String element)
             {
                 return '.' + element;
@@ -81,13 +70,6 @@ public final class ElementExpression
         COLLECTION_ELEMENT
         {
             @Override
-            public AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, ElementExpression.Raw element)
-            {
-                CollectionType<?> collectionType = (CollectionType<?>) columns.get(0).type;
-                return collectionType.valueComparator();
-            }
-
-            @Override
             public String toCQLString(String element)
             {
                 return '[' + element + ']';
@@ -100,7 +82,6 @@ public final class ElementExpression
             }
         };
 
-        public abstract AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, ElementExpression.Raw element);
         public abstract String toCQLString(String element);
     }
 
@@ -110,22 +91,17 @@ public final class ElementExpression
     private final ElementExpression.Kind kind;
 
     /**
-     * The field identifier in case of {@code UDT_FIELD} expression,
-     * {@code null} otherwise.
+     * The term representing the .
      */
-    private final FieldIdentifier fieldIdentifier;
+    private final Term keyOrIndex;
 
-    /**
-     * The collection element in case of {@code COLLECTION_ELEMENT} expression,
-     * {@code null} otherwise.
-     */
-    private final Term collectionElement;
+    private final AbstractType<?> type;
 
-    ElementExpression(ElementExpression.Kind kind, FieldIdentifier udtField, Term collectionElement)
+    ElementExpression(ElementExpression.Kind kind, AbstractType<?> type, Term keyOrIndex)
     {
         this.kind = kind;
-        this.fieldIdentifier = udtField;
-        this.collectionElement = collectionElement;
+        this.type = type;
+        this.keyOrIndex = keyOrIndex;
     }
 
     /**
@@ -138,32 +114,61 @@ public final class ElementExpression
     }
 
     /**
-     * Returns the expression UDT field in case of a UDT field expression.
-     * @return the expression UDT field.
+     * Returns the type of the value returned this expression.
+     * @return the type of the value returned this expression.
      */
-    public FieldIdentifier fieldIdentifier()
+    public AbstractType<?> type()
     {
-        return fieldIdentifier;
+        return type;
     }
 
     /**
-     * Returns the expression collection element in case of a collection element expression.
-     * In case of maps - this is the map key which we use to access the map value.
-     * @return the expression collection element.
+     * Collects the column specifications for the bind variables.
+     *
+     * @param boundNames the variables specification where to collect the
+     * bind variables of the map key/collection element in.
      */
-    public Term collectionElement()
+    public void collectMarkerSpecification(VariableSpecifications boundNames)
     {
-        return collectionElement;
+        keyOrIndex.collectMarkerSpecification(boundNames);
     }
 
-    public ByteBuffer mapKey(ColumnMetadata column, QueryOptions options)
+    /**
+     * Adds all functions (native and user-defined) used by any component of the restriction
+     * to the specified list.
+     * @param functions the list to add to
+     */
+    public void addFunctionsTo(List<Function> functions)
     {
-        ByteBuffer key = collectionElement().bindAndGet(options);
-        if (key == null)
-            throw invalidRequest("Invalid null map key for column %s", column.name.toCQLString());
-        if (key == ByteBufferUtil.UNSET_BYTE_BUFFER)
-            throw invalidRequest("Invalid unset map key for column %s", column.name.toCQLString());
-        return key;
+        keyOrIndex.addFunctionsTo(functions);
+    }
+
+    /**
+     * Bind the values in this term to the values contained in the {@code options}.
+     * This is obviously a no-op if the term is Terminal.
+     *
+     * @param options the values to bind markers to.
+     * @return the {@code Terminal} resulting of binding the values contained in the {@code options}.
+     */
+    public Term.Terminal bind(QueryOptions options)
+    {
+        return keyOrIndex.bind(options);
+    }
+
+    /**
+     * A shorter for {@code bind(options).get()}.
+     */
+    public ByteBuffer bindAndGet(QueryOptions options)
+    {
+        return keyOrIndex.bindAndGet(options);
+    }
+
+    public String toCQLString()
+    {
+        // If a Term is not terminal it can be a row marker or a function.
+        // We ignore the fact that it could be a function for now.
+        String value = keyOrIndex.isTerminal() ? type.asCQL3Type().toCQLLiteral(((Term.Terminal) keyOrIndex).get()) : "?";
+        return kind.toCQLString(value);
     }
 
     @Override
@@ -216,23 +221,34 @@ public final class ElementExpression
         /**
          * Bind this {@link Raw} instance to the schema and return the resulting {@link ElementExpression}.
          *
-         * @param table      the table schema
-         * @param identifier the column identifier
+         * @param column     the column
          * @return the {@link ElementExpression} resulting from the schema binding
          */
-        ElementExpression prepare(TableMetadata table, ColumnIdentifier identifier)
+        ElementExpression prepare(ColumnMetadata column)
         {
-            if (rawCollectionElement != null)
-                return new ElementExpression(Kind.COLLECTION_ELEMENT, null, prepareCollectionElement(table, rawCollectionElement, identifier));
+            if (kind == Kind.COLLECTION_ELEMENT)
+            {
+                if (!(column.type.isCollection()))
+                    throw invalidRequest("Invalid element access syntax for non-collection column %s", column.name);
 
-            return new ElementExpression(Kind.UDT_FIELD, udtField, null);
+                Term term = prepareCollectionElement(column);
+                AbstractType<?> elementType = ((CollectionType<?>) column.type).valueComparator();
+                return new ElementExpression(kind, elementType, term);
+            }
+
+            UserType userType = (UserType) column.type;
+            int fieldPosition = userType.fieldPosition(udtField);
+            if (fieldPosition == -1)
+                throw invalidRequest("Unknown field %s for column %s", udtField, column.name);
+
+            return new ElementExpression(kind,
+                                         userType.type(fieldPosition),
+                                         new Constants.Value(udtField.bytes));
         }
 
-        private Term prepareCollectionElement(TableMetadata table, Term.Raw rawCollectionElement, ColumnIdentifier identifier)
+        private Term prepareCollectionElement(ColumnMetadata receiver)
         {
             ColumnSpecification elementSpec;
-            ColumnMetadata receiver = table.getExistingColumn(identifier);
-
             switch ((((CollectionType<?>) receiver.type).kind))
             {
                 case LIST:
@@ -247,7 +263,7 @@ public final class ElementExpression
                     throw new AssertionError();
             }
 
-            return rawCollectionElement.prepare(table.keyspace, elementSpec);
+            return rawCollectionElement.prepare(receiver.ksName, elementSpec);
         }
 
         @Override
@@ -267,6 +283,12 @@ public final class ElementExpression
 
             ElementExpression.Raw r = (ElementExpression.Raw) o;
             return kind == r.kind && Objects.equals(rawCollectionElement, r.rawCollectionElement) && Objects.equals(udtField, r.udtField);
+        }
+
+        public String toCQLString()
+        {
+            String element = rawCollectionElement == null ? udtField.toString() : rawCollectionElement.getText();
+            return kind.toCQLString(element);
         }
 
         @Override

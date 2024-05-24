@@ -68,7 +68,7 @@ public final class ColumnsExpression
             }
 
             @Override
-            AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, ElementExpression.Raw element)
+            AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, ElementExpression element)
             {
                 return columns.get(0).type;
             }
@@ -108,7 +108,7 @@ public final class ColumnsExpression
             }
 
             @Override
-            AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, ElementExpression.Raw element)
+            AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, ElementExpression element)
             {
                 return new TupleType(ColumnMetadata.typesOf(columns));
             }
@@ -149,7 +149,7 @@ public final class ColumnsExpression
             }
 
             @Override
-            AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, ElementExpression.Raw element)
+            AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, ElementExpression element)
             {
                 return table.partitioner.getTokenValidator();
             }
@@ -185,15 +185,15 @@ public final class ColumnsExpression
             }
 
             @Override
-            AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, ElementExpression.Raw element)
+            AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, ElementExpression element)
             {
-                return element.kind().type(table, columns, element);
+                return element.type();
             }
 
             @Override
             String toCQLString(Stream<String> columns, String element)
             {
-                return columns.findFirst().orElseThrow() + elementExpression.kind().toCQLString(element);
+                return columns.findFirst().orElseThrow() + element;
             }
         };
 
@@ -217,7 +217,7 @@ public final class ColumnsExpression
          * @param element           the element expression in case of ELEMENT columns expression
          * @return the expression type
          */
-        abstract AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, ElementExpression.Raw element);
+        abstract AbstractType<?> type(TableMetadata table, List<ColumnMetadata> columns, ElementExpression element);
 
         /**
          * Returns CQL representation of the expression.
@@ -230,52 +230,13 @@ public final class ColumnsExpression
 
         String toCQLString(List<ColumnMetadata> columns, ElementExpression elementExpression)
         {
-            CQL3Type cql3Type;
-            String element = null;
-            if (elementExpression != null)
-            {
-                AbstractType<?> type = columns.get(0).type;
-                switch (elementExpression.kind())
-                {
-                    case COLLECTION_ELEMENT:
-
-                        if (type instanceof MapType<?,?>)
-                            cql3Type = ((MapType<?,?>) type).getKeysType().asCQL3Type();
-                        else
-                            cql3Type = type.asCQL3Type();
-                        // If a Term is not terminal it can be a row marker or a function.
-                        // We ignore the fact that it could be a function for now.
-                        element = elementExpression.collectionElement().isTerminal() ? cql3Type.toCQLLiteral(((Term.Terminal) elementExpression.collectionElement()).get()) : "?";
-                        break;
-                    case UDT_FIELD:
-                        cql3Type = type.asCQL3Type();
-                        element = cql3Type.toCQLLiteral(elementExpression.fieldIdentifier().bytes);
-                        break;
-                }
-            }
-            return toCQLString(columns.stream().map(c -> c.name.toCQLString()), element);
+            return toCQLString(columns.stream().map(c -> c.name.toCQLString()), elementExpression != null ? elementExpression.toCQLString() : "");
         }
 
         String toCQLString(List<ColumnIdentifier> identifiers, ElementExpression.Raw rawElement)
         {
-            if (this == ELEMENT)
-            {
-                assert rawElement != null;
-
-                String udtField = rawElement.rawUdtField() == null ? null : rawElement.rawUdtField().toString();
-                String collectionElement = rawElement.rawCollectionElement() == null ? null : rawElement.rawCollectionElement().getText();
-
-                switch (rawElement.kind())
-                {
-                    case COLLECTION_ELEMENT:
-                        return toCQLString(identifiers.stream().map(ColumnIdentifier::toCQLString), collectionElement);
-                    case UDT_FIELD:
-                        return toCQLString(identifiers.stream().map(ColumnIdentifier::toCQLString), udtField);
-                }
-            }
-
-
-            return toCQLString(identifiers.stream().map(ColumnIdentifier::toCQLString), null);
+            String element = rawElement == null ? "" : rawElement.toCQLString();
+            return toCQLString(identifiers.stream().map(ColumnIdentifier::toCQLString), element);
         }
     }
 
@@ -306,7 +267,15 @@ public final class ColumnsExpression
         this.type = type;
         this.columns = columns;
         this.element = element; // This could be null for kinds that don't use it
+    }
 
+    /**
+     * Returns the expression type.
+     * @return the expression type.
+     */
+    public AbstractType<?> type()
+    {
+        return type;
     }
 
     /**
@@ -389,28 +358,6 @@ public final class ColumnsExpression
     }
 
     /**
-     * Returns the element in case of ELEMENT columns expression - COLLECTION_ELEMENT.
-     * @return the ELEMENT expression element - collection element.
-     */
-    public Term collectionElement()
-    {
-        assert kind == Kind.ELEMENT && element != null && element.kind() == ElementExpression.Kind.COLLECTION_ELEMENT;
-
-        return element.collectionElement();
-    }
-
-    /**
-     * Returns the element in case of ELEMENT columns expression - UDT_FIELD.
-     * @return the ELEMENT expression element - UDT field.
-     */
-    public FieldIdentifier udtField()
-    {
-        assert kind == Kind. ELEMENT &&  element != null && element.kind() == ElementExpression.Kind.UDT_FIELD;
-
-        return element.fieldIdentifier();
-    }
-
-    /**
      * Returns the element expression kind in case of ELEMENT columns expression.
      * @return the element expression kind.
      */
@@ -455,8 +402,8 @@ public final class ColumnsExpression
      */
     public void collectMarkerSpecification(VariableSpecifications boundNames)
     {
-        if (this.isCollectionElementExpression())
-            collectionElement().collectMarkerSpecification(boundNames);
+        if (element != null)
+            element.collectMarkerSpecification(boundNames);
     }
 
     /**
@@ -475,8 +422,8 @@ public final class ColumnsExpression
      */
     public void addFunctionsTo(List<Function> functions)
     {
-        if (this.isCollectionElementExpression())
-            collectionElement().addFunctionsTo(functions);
+        if (element != null)
+            element.addFunctionsTo(functions);
     }
 
     /**
@@ -627,11 +574,11 @@ public final class ColumnsExpression
             List<ColumnMetadata> columns = getColumnsMetadata(table, identifiers);
             kind.validateColumns(table, columns);
 
-            AbstractType<?> type = kind.type(table, columns, rawElement);
-
             ElementExpression elementExpression = null;
             if (kind == Kind.ELEMENT)
-                elementExpression = rawElement.prepare(table, identifiers.get(0));
+                elementExpression = rawElement.prepare(columns.get(0));
+
+            AbstractType<?> type = kind.type(table, columns, elementExpression);
 
             return new ColumnsExpression(kind, type, columns, elementExpression);
         }

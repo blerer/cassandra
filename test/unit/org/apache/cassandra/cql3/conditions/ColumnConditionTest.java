@@ -135,7 +135,9 @@ public class ColumnConditionTest
     private static boolean conditionApplies(ByteBuffer rowValue, Operator op, ByteBuffer conditionValue)
     {
         ColumnMetadata definition = ColumnMetadata.regularColumn("ks", "cf", "c", Int32Type.instance);
-        ColumnCondition condition = ColumnCondition.simpleColumnCondition(ColumnsExpression.singleColumn(definition), op, Terms.of(new Constants.Value(conditionValue)));
+        ColumnsExpression column = ColumnsExpression.singleColumn(definition);
+        Terms terms = Terms.of(new Constants.Value(conditionValue));
+        ColumnCondition condition = new ColumnCondition(column, op, terms);
         ColumnCondition.Bound bound = condition.bind(QueryOptions.DEFAULT);
         return bound.appliesTo(newRow(definition, rowValue));
     }
@@ -144,7 +146,9 @@ public class ColumnConditionTest
     {
         ListType<Integer> type = ListType.getInstance(Int32Type.instance, true);
         ColumnMetadata definition = ColumnMetadata.regularColumn("ks", "cf", "c", type);
-        ColumnCondition condition = ColumnCondition.simpleColumnCondition(ColumnsExpression.singleColumn(definition), op, Terms.of(new MultiElements.Value(type, conditionValue)));
+        ColumnsExpression column = ColumnsExpression.singleColumn(definition);
+        Terms terms = Terms.of(new MultiElements.Value(type, conditionValue));
+        ColumnCondition condition = new ColumnCondition(column, op, terms);
         ColumnCondition.Bound bound = condition.bind(QueryOptions.DEFAULT);
         return bound.appliesTo(newRow(definition, rowValue));
     }
@@ -152,7 +156,9 @@ public class ColumnConditionTest
     private static boolean conditionContainsApplies(List<ByteBuffer> rowValue, Operator op, ByteBuffer conditionValue)
     {
         ColumnMetadata definition = ColumnMetadata.regularColumn("ks", "cf", "c", ListType.getInstance(Int32Type.instance, true));
-        ColumnCondition condition = ColumnCondition.simpleColumnCondition(ColumnsExpression.singleColumn(definition), op, Terms.of(new Constants.Value(conditionValue)));
+        ColumnsExpression column = ColumnsExpression.singleColumn(definition);
+        Terms terms = Terms.of(new Constants.Value(conditionValue));
+        ColumnCondition condition = new ColumnCondition(column, op, terms);
         ColumnCondition.Bound bound = condition.bind(QueryOptions.DEFAULT);
         return bound.appliesTo(newRow(definition, rowValue));
     }
@@ -160,7 +166,9 @@ public class ColumnConditionTest
     private static boolean conditionContainsApplies(Map<ByteBuffer, ByteBuffer> rowValue, Operator op, ByteBuffer conditionValue)
     {
         ColumnMetadata definition = ColumnMetadata.regularColumn("ks", "cf", "c", MapType.getInstance(Int32Type.instance, Int32Type.instance, true));
-        ColumnCondition condition = ColumnCondition.simpleColumnCondition(ColumnsExpression.singleColumn(definition), op, Terms.of(new Constants.Value(conditionValue)));
+        ColumnsExpression column = ColumnsExpression.singleColumn(definition);
+        Terms terms = Terms.of(new Constants.Value(conditionValue));
+        ColumnCondition condition = new ColumnCondition(column, op, terms);
         ColumnCondition.Bound bound = condition.bind(QueryOptions.DEFAULT);
         return bound.appliesTo(newRow(definition, rowValue));
     }
@@ -169,7 +177,9 @@ public class ColumnConditionTest
     {
         SetType<Integer> type = SetType.getInstance(Int32Type.instance, true);
         ColumnMetadata definition = ColumnMetadata.regularColumn("ks", "cf", "c", type);
-        ColumnCondition condition = ColumnCondition.simpleColumnCondition(ColumnsExpression.singleColumn(definition), op, Terms.of(new MultiElements.Value(type, new ArrayList<>(conditionValue))));
+        ColumnsExpression column = ColumnsExpression.singleColumn(definition);
+        Terms terms = Terms.of(new MultiElements.Value(type, new ArrayList<>(conditionValue)));
+        ColumnCondition condition = new ColumnCondition(column, op, terms);
         ColumnCondition.Bound bound = condition.bind(QueryOptions.DEFAULT);
         return bound.appliesTo(newRow(definition, rowValue));
     }
@@ -177,7 +187,9 @@ public class ColumnConditionTest
     private static boolean conditionContainsApplies(SortedSet<ByteBuffer> rowValue, Operator op, ByteBuffer conditionValue)
     {
         ColumnMetadata definition = ColumnMetadata.regularColumn("ks", "cf", "c", SetType.getInstance(Int32Type.instance, true));
-        ColumnCondition condition = ColumnCondition.simpleColumnCondition(ColumnsExpression.singleColumn(definition), op, Terms.of(new Constants.Value(conditionValue)));
+        ColumnsExpression column = ColumnsExpression.singleColumn(definition);
+        Terms terms = Terms.of(new Constants.Value(conditionValue));
+        ColumnCondition condition = new ColumnCondition(column, op, terms);
 
         ColumnCondition.Bound bound = condition.bind(QueryOptions.DEFAULT);
         return bound.appliesTo(newRow(definition, rowValue));
@@ -193,7 +205,9 @@ public class ColumnConditionTest
             value.add(entry.getKey());
             value.add(entry.getValue());
         }
-        ColumnCondition condition = ColumnCondition.simpleColumnCondition(ColumnsExpression.singleColumn(definition), op, Terms.of(new MultiElements.Value(type, value)));
+        ColumnsExpression column = ColumnsExpression.singleColumn(definition);
+        Terms terms = Terms.of(new MultiElements.Value(type, value));
+        ColumnCondition condition = new ColumnCondition(column, op, terms);
         ColumnCondition.Bound bound = condition.bind(QueryOptions.DEFAULT);
         return bound.appliesTo(newRow(definition, rowValue));
     }
