@@ -22,15 +22,26 @@ import java.util.*;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.ColumnSpecification;
+import org.apache.cassandra.cql3.ColumnsExpression;
+import org.apache.cassandra.cql3.FieldIdentifier;
+import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.VariableSpecifications;
 import org.apache.cassandra.cql3.functions.Function;
-import org.apache.cassandra.cql3.terms.Lists;
-import org.apache.cassandra.cql3.terms.Maps;
 import org.apache.cassandra.cql3.terms.Term;
 import org.apache.cassandra.cql3.terms.Terms;
-import org.apache.cassandra.cql3.terms.UserTypes;
-import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.CollectionType;
+import org.apache.cassandra.db.marshal.CounterColumnType;
+import org.apache.cassandra.db.marshal.ListType;
+import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.marshal.MultiElementType;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.ColumnData;
+import org.apache.cassandra.db.rows.ComplexColumnData;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -114,7 +125,7 @@ public final class ColumnCondition
     private ColumnCondition.Bound bindElement(QueryOptions options)
     {
         ColumnMetadata column = columnsExpression.firstColumn();
-        ByteBuffer keyOrIndex = columnsExpression.element().bindAndGet(options);
+        ByteBuffer keyOrIndex = columnsExpression.element(options);
         if (column.type.isCollection())
         {
             checkNotNull(keyOrIndex, "Invalid null value for %s element access", column.type instanceof MapType ? "map" : "list");
@@ -261,22 +272,15 @@ public final class ColumnCondition
     public static class Raw
     {
         private final ColumnsExpression.Raw rawExpressions;
-        private final Terms.Raw values;
-
-        // Can be null, only used with the syntax "IF m[e] = ..." (in which case it's 'e')
-        private final Term.Raw collectionElement;
-
-        // Can be null, only used with the syntax "IF udt.field = ..." (in which case it's 'field')
-        private final FieldIdentifier udtField;
 
         private final Operator operator;
 
-        private Raw(ColumnsExpression.Raw columnExpressions, Term.Raw collectionElement, FieldIdentifier udtField, Operator op, Terms.Raw values)
+        private final Terms.Raw values;
+
+        private Raw(ColumnsExpression.Raw columnExpressions, Operator op, Terms.Raw values)
         {
             this.rawExpressions = columnExpressions;
             this.values = values;
-            this.collectionElement = collectionElement;
-            this.udtField = udtField;
             this.operator = op;
         }
 
@@ -285,7 +289,7 @@ public final class ColumnCondition
          */
         public static Raw simpleCondition(ColumnIdentifier column, Operator op, Terms.Raw values)
         {
-            return new Raw(ColumnsExpression.Raw.singleColumn(column), null, null, op, values);
+            return new Raw(ColumnsExpression.Raw.singleColumn(column), op, values);
         }
 
         /**
@@ -293,7 +297,7 @@ public final class ColumnCondition
          */
         public static Raw collectionElementCondition(ColumnIdentifier column, Term.Raw collectionElement, Operator op, Terms.Raw values)
         {
-            return new Raw(ColumnsExpression.Raw.collectionElement(column, collectionElement), collectionElement, null, op, values);
+            return new Raw(ColumnsExpression.Raw.collectionElement(column, collectionElement), op, values);
         }
 
         /**
@@ -301,55 +305,27 @@ public final class ColumnCondition
          */
         public static Raw udtFieldCondition(ColumnIdentifier column, FieldIdentifier udtField, Operator op, Terms.Raw values)
         {
-            return new Raw(ColumnsExpression.Raw.udtField(column, udtField), null, udtField, op, values);
+            return new Raw(ColumnsExpression.Raw.udtField(column, udtField), op, values);
         }
 
-        public ColumnIdentifier column()
+        public ColumnsExpression.Raw columnExpression()
         {
-            return rawExpressions.identifiers().get(0);
+            return rawExpressions;
         }
 
         public ColumnCondition prepare(TableMetadata table)
         {
             ColumnsExpression expression = rawExpressions.prepare(table);
-            ColumnSpecification receiver = receiver(table, expression);
-            validateOperationOnDurations(receiver.type);
-            return new ColumnCondition(expression, operator, prepareTerms(table.keyspace, receiver));
-        }
+            ColumnSpecification receiver = expression.columnSpecification();
 
-        private ColumnSpecification receiver(TableMetadata table, ColumnsExpression expression)
-        {
-            ColumnMetadata receiver = table.getExistingColumn(column());
-            checkFalse(receiver.isPrimaryKeyColumn(), "PRIMARY KEY column '%s' cannot have IF conditions", receiver.name);
+            checkFalse(expression.columnsKind().isPrimaryKeyKind(), "PRIMARY KEY column '%s' cannot have IF conditions", receiver.name);
 
             if (receiver.type instanceof CounterColumnType)
                 throw invalidRequest("Conditions on counters are not supported");
 
-            if (expression.kind() == ColumnsExpression.Kind.ELEMENT)
-            {
-                switch (expression.elementKind())
-                {
-                    case COLLECTION_ELEMENT:
-                        switch ((((CollectionType<?>) receiver.type).kind))
-                        {
-                            case LIST:
-                                return Lists.valueSpecOf(receiver);
-                            case MAP:
-                                return Maps.valueSpecOf(receiver);
-                            case SET:
-                                throw invalidRequest("Invalid element access syntax for set column %s", receiver.name);
-                            default:
-                                throw new AssertionError();
-                        }
-
-                    case UDT_FIELD:
-                        int fieldPosition = ((UserType) receiver.type).fieldPosition(udtField);
-                        return UserTypes.fieldSpecOf(receiver, fieldPosition);
-                }
-            }
-            return receiver;
+            validateOperationOnDurations(receiver.type);
+            return new ColumnCondition(expression, operator, prepareTerms(table.keyspace, receiver));
         }
-
 
         private Terms prepareTerms(String keyspace, ColumnSpecification receiver)
         {
@@ -375,9 +351,13 @@ public final class ColumnCondition
             }
         }
 
+        /**
+         * Checks if this raw condition contains bind markers.
+         * @return {@code true} if this raw condition contains bind markers, {@code false} otherwise.
+         */
         public boolean containsBindMarkers()
         {
-            return values.containsBindMarkers() || (collectionElement != null && collectionElement.containsBindMarkers());
+            return rawExpressions.containsBindMarkers() || values.containsBindMarkers();
         }
 
         @VisibleForTesting

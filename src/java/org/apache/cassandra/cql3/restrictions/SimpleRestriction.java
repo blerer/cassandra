@@ -359,7 +359,11 @@ public final class SimpleRestriction implements SingleRestriction
                 // TODO only map elements supported for now
                 if (columnsExpression.isMapElementExpression())
                 {
-                    ByteBuffer key = columnsExpression.element().bindAndGet(options);
+                    ByteBuffer key = columnsExpression.element(options);
+                    if (key == null)
+                        throw invalidRequest("Invalid null map key for column %s", firstColumn().name.toCQLString());
+                    if (key == ByteBufferUtil.UNSET_BYTE_BUFFER)
+                        throw invalidRequest("Invalid unset map key for column %s", firstColumn().name.toCQLString());
                     List<ByteBuffer> values = bindAndGet(options);
                     filter.addMapEquality(firstColumn(), key, operator, values.get(0));
                 }

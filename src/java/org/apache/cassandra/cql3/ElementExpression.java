@@ -29,6 +29,9 @@ import org.apache.cassandra.cql3.terms.Maps;
 import org.apache.cassandra.cql3.terms.Term;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.schema.ColumnMetadata;
 
@@ -91,16 +94,22 @@ public final class ElementExpression
     private final ElementExpression.Kind kind;
 
     /**
-     * The term representing the .
+     * The type of the key, index or udt field.
+     */
+    private final AbstractType<?> keyOrIndexType;
+
+    /**
+     * The term representing the key, index or udt field.
      */
     private final Term keyOrIndex;
 
     private final AbstractType<?> type;
 
-    ElementExpression(ElementExpression.Kind kind, AbstractType<?> type, Term keyOrIndex)
+    ElementExpression(ElementExpression.Kind kind, AbstractType<?> type, AbstractType<?> keyOrIndexType, Term keyOrIndex)
     {
         this.kind = kind;
         this.type = type;
+        this.keyOrIndexType = keyOrIndexType;
         this.keyOrIndex = keyOrIndex;
     }
 
@@ -167,7 +176,8 @@ public final class ElementExpression
     {
         // If a Term is not terminal it can be a row marker or a function.
         // We ignore the fact that it could be a function for now.
-        String value = keyOrIndex.isTerminal() ? type.asCQL3Type().toCQLLiteral(((Term.Terminal) keyOrIndex).get()) : "?";
+
+        String value = keyOrIndex.isTerminal() ? keyOrIndexType.asCQL3Type().toCQLLiteral(((Term.Terminal) keyOrIndex).get()) : "?";
         return kind.toCQLString(value);
     }
 
@@ -201,24 +211,6 @@ public final class ElementExpression
         }
 
         /**
-         * Returns the collection element if this is a collection element expression, {@code null} otherwise.
-         * @return rawCollectionElement.
-         */
-        public Term.Raw rawCollectionElement()
-        {
-            return rawCollectionElement;
-        }
-
-        /**
-         * Returns the collection element if this is a collection element expression, {@code null} otherwise.
-         * @return rawCollectionElement.
-         */
-        public FieldIdentifier rawUdtField()
-        {
-            return udtField;
-        }
-
-        /**
          * Bind this {@link Raw} instance to the schema and return the resulting {@link ElementExpression}.
          *
          * @param column     the column
@@ -232,8 +224,10 @@ public final class ElementExpression
                     throw invalidRequest("Invalid element access syntax for non-collection column %s", column.name);
 
                 Term term = prepareCollectionElement(column);
-                AbstractType<?> elementType = ((CollectionType<?>) column.type).valueComparator();
-                return new ElementExpression(kind, elementType, term);
+                CollectionType<?> collectionType = (CollectionType<?>) column.type;
+                AbstractType<?> elementType = collectionType.valueComparator();
+                AbstractType<?> keyOrIndexType = collectionType.isMap() ? ((MapType<?, ?>) collectionType).getKeysType() : Int32Type.instance;
+                return new ElementExpression(kind, elementType, keyOrIndexType, term);
             }
 
             UserType userType = (UserType) column.type;
@@ -243,6 +237,7 @@ public final class ElementExpression
 
             return new ElementExpression(kind,
                                          userType.type(fieldPosition),
+                                         UTF8Type.instance,
                                          new Constants.Value(udtField.bytes));
         }
 
@@ -264,6 +259,16 @@ public final class ElementExpression
             }
 
             return rawCollectionElement.prepare(receiver.ksName, elementSpec);
+        }
+
+
+        /**
+         * Checks if this raw expression contains bind markers.
+         * @return {@code true} if this raw expression contains bind markers, {@code false} otherwise.
+         */
+        public boolean containsBindMarkers()
+        {
+            return rawCollectionElement != null && rawCollectionElement.containsBindMarkers();
         }
 
         @Override

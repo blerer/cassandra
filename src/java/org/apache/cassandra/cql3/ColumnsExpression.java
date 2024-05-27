@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.cql3;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -172,13 +173,6 @@ public final class ColumnsExpression
          */
         ELEMENT
         {
-            private ElementExpression.Raw elementExpression = null;
-
-            @Override
-            void setElementExpression(ElementExpression.Raw elementExpression)
-            {
-                this.elementExpression = elementExpression;
-            }
             @Override
             void validateColumns(TableMetadata table, List<ColumnMetadata> columns)
             {
@@ -196,11 +190,6 @@ public final class ColumnsExpression
                 return columns.findFirst().orElseThrow() + element;
             }
         };
-
-        void setElementExpression(ElementExpression.Raw elementExpression)
-        {
-            throw new UnsupportedOperationException();
-        }
 
         /**
          * Validates that the specified columns are valid for this kind of expression.
@@ -243,10 +232,13 @@ public final class ColumnsExpression
     private final Kind kind;
 
     /**
-     * The type represented by this expression:
-     *  - for a single column the type of the expression will be the one of the column
-     *  - for a multi-column expression the type will be a tuple type
-     *  - for an element expression the type will be the one of the element of interest(udt field or collection element)
+     * The type represented by this expression.
+     * <li>
+     *  <ul>for a single column the type of the expression will be the one of the column</ul>
+     *  <ul>for a multi-column expression the type will be a tuple type</ul>
+     *  <ul>for a token expression the type will be the token type</ul>
+     *  <ul>for an element expression the type will be the one of the element of interest(udt field or collection element)</ul>
+     * </li>
      */
     private final AbstractType<?> type;
 
@@ -263,6 +255,7 @@ public final class ColumnsExpression
 
     ColumnsExpression(Kind kind, AbstractType<?> type, List<ColumnMetadata> columns,  ElementExpression element)
     {
+        assert kind != Kind.ELEMENT || element != null: "Element expression must have an element";
         this.kind = kind;
         this.type = type;
         this.columns = columns;
@@ -335,7 +328,7 @@ public final class ColumnsExpression
      */
     public ColumnMetadata.Kind columnsKind()
     {
-        // All columns must have the same type.
+        // All columns must have the same kind.
         return firstColumn().kind;
     }
 
@@ -349,21 +342,12 @@ public final class ColumnsExpression
     }
 
     /**
-     * Returns the element in case of ELEMENT columns expression.
-     * @return the ELEMENT expression element - udt field, collection element.
+     * Returns the key, index or fieldname specifying the selected element.
+     * @return the key, index or fieldname specifying the selected element.
      */
-    public ElementExpression element()
+    public ByteBuffer element(QueryOptions options)
     {
-        return element;
-    }
-
-    /**
-     * Returns the element expression kind in case of ELEMENT columns expression.
-     * @return the element expression kind.
-     */
-    public ElementExpression.Kind elementKind()
-    {
-        return this.element().kind();
+        return element.bindAndGet(options);
     }
 
     /**
@@ -373,15 +357,6 @@ public final class ColumnsExpression
     public boolean isCollectionElementExpression()
     {
         return kind == Kind.ELEMENT && element != null && element.kind() == ElementExpression.Kind.COLLECTION_ELEMENT;
-    }
-
-    /**
-     * Checks if this instance is a UDT field element expression.
-     * @return {@code true} if this instance is a UDT field element expression, {@code false} otherwise.
-     */
-    public boolean isUDTFieldElementExpression()
-    {
-        return kind == Kind.ELEMENT && element != null && element.kind() == ElementExpression.Kind.UDT_FIELD;
     }
 
     /**
@@ -473,8 +448,6 @@ public final class ColumnsExpression
         private Raw(Kind kind, List<ColumnIdentifier> identifiers, ElementExpression.Raw rawElement)
         {
             this.kind = kind;
-            if(kind == Kind.ELEMENT)
-                Kind.ELEMENT.setElementExpression(rawElement);
             this.identifiers = identifiers;
             this.rawElement = rawElement;
         }
@@ -561,6 +534,15 @@ public final class ColumnsExpression
                                                                .map(e -> e.equals(from) ? to : e)
                                                                .collect(Collectors.toList());
             return new Raw(kind, newIdentifiers, rawElement);
+        }
+
+        /**
+         * Checks if this raw expression contains bind markers.
+         * @return {@code true} if this raw expression contains bind markers, {@code false} otherwise.
+         */
+        public boolean containsBindMarkers()
+        {
+            return rawElement != null && rawElement.containsBindMarkers();
         }
 
         /**

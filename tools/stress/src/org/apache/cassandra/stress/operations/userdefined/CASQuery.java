@@ -28,6 +28,7 @@ import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.ResultSet;
 import org.antlr.runtime.RecognitionException;
 import org.apache.cassandra.cql3.CQLFragmentParser;
+import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.CqlParser;
 import org.apache.cassandra.cql3.conditions.ColumnCondition;
 import org.apache.cassandra.cql3.statements.ModificationStatement;
@@ -96,8 +97,9 @@ public class CASQuery extends SchemaStatement
             {
                 casReadConditionQuery.append(", ");
             }
-            casReadConditionQuery.append(condition.column().toString());
-            casConditionIndex.add(getDataSpecification().partitionGenerator.indexOf(condition.column().toString()));
+            ColumnIdentifier column = condition.columnExpression().identifiers().get(0);
+            casReadConditionQuery.append(column.toString());
+            casConditionIndex.add(getDataSpecification().partitionGenerator.indexOf(column.toString()));
             first = false;
         }
         casReadConditionQuery.append(" FROM ").append(tableName).append(" WHERE ");
