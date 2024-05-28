@@ -698,7 +698,7 @@ public final class VectorType<T> extends MultiElementType<List<T>>
     }
 
     @Override
-    public int compareCQL(ComplexColumnData columnData, List<ByteBuffer> elements)
+    public int compareForCQL(ComplexColumnData columnData, List<ByteBuffer> elements)
     {
         throw new UnsupportedOperationException();
     }

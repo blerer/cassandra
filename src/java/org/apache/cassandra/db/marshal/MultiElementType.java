@@ -79,7 +79,7 @@ public abstract class MultiElementType<T> extends AbstractType<T>
      * @return a negative integer, zero, or a positive integer as the column data is less than, equal to, or greater than the elements.
      * @throws UnsupportedOperationException if the comparison is not supported by this type.
      */
-    public abstract int compareCQL(ComplexColumnData columnData, List<ByteBuffer> elements);
+    public abstract int compareForCQL(ComplexColumnData columnData, List<ByteBuffer> elements);
 
     /**
      * Returns the type of the element at the specified key or index (optional operation).

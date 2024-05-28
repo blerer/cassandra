@@ -419,7 +419,7 @@ public abstract class CollectionType<T> extends MultiElementType<T>
 
     public abstract void forEach(ByteBuffer input, Consumer<ByteBuffer> action);
 
-    public final int compareCQL(ComplexColumnData columnData, List<ByteBuffer> elements)
+    public final int compareForCQL(ComplexColumnData columnData, List<ByteBuffer> elements)
     {
         Iterator<Cell<?>> cellIterator = columnData.iterator();
         Iterator<ByteBuffer> elementIter = elements.iterator();

@@ -433,7 +433,7 @@ public class UserType extends TupleType implements SchemaElement
     }
 
     @Override
-    public int compareCQL(ComplexColumnData columnData, List<ByteBuffer> fields)
+    public int compareForCQL(ComplexColumnData columnData, List<ByteBuffer> fields)
     {
         Iterator<Cell<?>> cellIter = columnData.iterator();
         int i = 0;

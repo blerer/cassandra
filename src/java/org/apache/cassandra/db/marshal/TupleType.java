@@ -612,7 +612,7 @@ public class TupleType extends MultiElementType<ByteBuffer>
     }
 
     @Override
-    public int compareCQL(ComplexColumnData columnData, List<ByteBuffer> fields)
+    public int compareForCQL(ComplexColumnData columnData, List<ByteBuffer> fields)
     {
         throw new UnsupportedOperationException("Multicell tuples are not supported");
     }

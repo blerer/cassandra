@@ -29,9 +29,12 @@ import java.util.stream.Collectors;
 import com.google.common.collect.RangeSet;
 
 import org.apache.cassandra.cql3.restrictions.ClusteringElements;
+import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.ListType;
+import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.MultiElementType;
 import org.apache.cassandra.db.marshal.SetType;
@@ -56,28 +59,40 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public ThreeValued isConditionSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             // Legacy behavior of LWT conditions
-            if (leftOperand == null || rightOperand == null)
-                return leftOperand == rightOperand;
+            if (rightOperand == null || leftOperand == null)
+                return ThreeValued.of(rightOperand == leftOperand);
 
-            return type.compareForCQL(leftOperand, rightOperand) == 0;
+            return ThreeValued.of(perform(type, leftOperand, rightOperand));
         }
 
         @Override
-        public boolean isSatisfiedBy(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        public ThreeValued isConditionSatisfiedBy(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
         {
             // Legacy behavior of LWT conditions
             if (rightOperand == null)
-                return leftOperand == null;
+                return leftOperand == null ? ThreeValued.TRUE : ThreeValued.FALSE;
 
             List<ByteBuffer> elements = type.unpack(rightOperand);
 
             if (elements.isEmpty())
-                return leftOperand == null;
+                return leftOperand == null ? ThreeValued.TRUE : ThreeValued.FALSE;
 
-            return leftOperand != null && type.compareCQL(leftOperand, elements) == 0;
+            return ThreeValued.of(leftOperand != null && type.compareForCQL(leftOperand, elements) == 0);
+        }
+
+        @Override
+        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return type.compareForCQL(leftOperand, rightOperand) == 0;
+        }
+
+        @Override
+        protected boolean perform(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        {
+            return type.compareForCQL(leftOperand, type.unpack(rightOperand)) == 0;
         }
 
         @Override
@@ -116,17 +131,15 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
-            checkTrue(rightOperand != null, "Invalid comparison with null for operator \"%s\"", this);
-            return leftOperand != null && type.compareForCQL(leftOperand, rightOperand) < 0;
+            return type.compareForCQL(leftOperand, rightOperand) < 0;
         }
 
         @Override
-        public boolean isSatisfiedBy(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        protected boolean perform(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
         {
-            checkTrue(rightOperand != null, "Invalid comparison with null for operator \"%s\"", this);
-            return leftOperand != null && type.compareCQL(leftOperand, type.unpack(rightOperand)) < 0;
+            return type.compareForCQL(leftOperand, type.unpack(rightOperand)) < 0;
         }
 
         @Override
@@ -169,17 +182,15 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
-            checkTrue(rightOperand != null, "Invalid comparison with null for operator \"%s\"", this);
-            return leftOperand != null && type.compareForCQL(leftOperand, rightOperand) <= 0;
+            return type.compareForCQL(leftOperand, rightOperand) <= 0;
         }
 
         @Override
-        public boolean isSatisfiedBy(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        protected boolean perform(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
         {
-            checkTrue(rightOperand != null, "Invalid comparison with null for operator \"%s\"", this);
-            return leftOperand != null && type.compareCQL(leftOperand, type.unpack(rightOperand)) <= 0;
+            return type.compareForCQL(leftOperand, type.unpack(rightOperand)) <= 0;
         }
 
         @Override
@@ -223,17 +234,15 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
-            checkTrue(rightOperand != null, "Invalid comparison with null for operator \"%s\"", this);
-            return leftOperand != null && type.compareForCQL(leftOperand, rightOperand) >= 0;
+            return type.compareForCQL(leftOperand, rightOperand) >= 0;
         }
 
         @Override
-        public boolean isSatisfiedBy(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        protected boolean perform(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
         {
-            checkTrue(rightOperand != null, "Invalid comparison with null for operator \"%s\"", this);
-            return leftOperand != null && type.compareCQL(leftOperand, type.unpack(rightOperand)) >= 0;
+            return type.compareForCQL(leftOperand, type.unpack(rightOperand)) >= 0;
         }
 
         @Override
@@ -276,17 +285,15 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
-            checkTrue(rightOperand != null, "Invalid comparison with null for operator \"%s\"", this);
-            return leftOperand != null && type.compareForCQL(leftOperand, rightOperand) > 0;
+            return type.compareForCQL(leftOperand, rightOperand) > 0;
         }
 
         @Override
-        public boolean isSatisfiedBy(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        protected boolean perform(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
         {
-            checkTrue(rightOperand != null, "Invalid comparison with null for operator \"%s\"", this);
-            return leftOperand != null && type.compareCQL(leftOperand, type.unpack(rightOperand)) > 0;
+            return type.compareForCQL(leftOperand, type.unpack(rightOperand)) > 0;
         }
 
         @Override
@@ -322,27 +329,42 @@ public enum Operator
     },
     IN(7)
     {
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        @Override
+        public ThreeValued isConditionSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             checkTrue(rightOperand != null, "Invalid comparison with null for operator \"%s\"", this);
             ListSerializer<?> serializer = ListType.getInstance(type, false).getSerializer();
 
             if (leftOperand == null)
-                return serializer.anyMatch(rightOperand, Objects::isNull);
+                return ThreeValued.of(serializer.anyMatch(rightOperand, Objects::isNull));
 
-            return serializer.anyMatch(rightOperand, r -> r != null && type.compareForCQL(leftOperand, r) == 0);
+            return ThreeValued.of(serializer.anyMatch(rightOperand, r -> r != null && type.compareForCQL(leftOperand, r) == 0));
         }
 
         @Override
-        public boolean isSatisfiedBy(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        public ThreeValued isConditionSatisfiedBy(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
         {
             checkTrue(rightOperand != null, "Invalid comparison with null for operator \"%s\"", this);
             ListSerializer<?> serializer = ListType.getInstance(type, false).getSerializer();
 
             if (leftOperand == null)
-                return serializer.anyMatch(rightOperand, Objects::isNull);
+                return ThreeValued.of(serializer.anyMatch(rightOperand, Objects::isNull));
 
-            return serializer.anyMatch(rightOperand, r -> r != null && type.compareCQL(leftOperand, type.unpack(r)) == 0);
+            return ThreeValued.of(serializer.anyMatch(rightOperand, r -> r != null && type.compareForCQL(leftOperand, type.unpack(r)) == 0));
+        }
+
+        @Override
+        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            ListSerializer<?> serializer = ListType.getInstance(type, false).getSerializer();
+            return serializer.anyMatch(rightOperand, r -> type.compareForCQL(leftOperand, r) == 0);
+        }
+
+        @Override
+        protected boolean perform(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        {
+            ListSerializer<?> serializer = ListType.getInstance(type, false).getSerializer();
+            return serializer.anyMatch(rightOperand, r -> type.compareForCQL(leftOperand, type.unpack(r)) == 0);
         }
 
         @Override
@@ -360,13 +382,8 @@ public enum Operator
     CONTAINS(5)
     {
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
-            checkTrue(rightOperand != null, "Invalid comparison with null for operator \"%s\"", this);
-
-            if (leftOperand == null)
-                return false;
-
             switch(((CollectionType<?>) type).kind)
             {
                 case LIST:
@@ -383,10 +400,9 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        protected boolean perform(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
         {
-            checkTrue(rightOperand != null, "Invalid comparison with null for operator \"%s\"", this);
-            return leftOperand != null && ((CollectionType<?>) type).contains(leftOperand, rightOperand);
+            return ((CollectionType<?>) type).contains(leftOperand, rightOperand);
         }
 
         @Override
@@ -410,18 +426,16 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
-            checkTrue(rightOperand != null, "Invalid comparison with null for operator \"%s\"", this);
             MapType<?, ?> mapType = (MapType<?, ?>) type;
-            return leftOperand != null && mapType.compose(leftOperand).containsKey(mapType.getKeysType().compose(rightOperand));
+            return mapType.compose(leftOperand).containsKey(mapType.getKeysType().compose(rightOperand));
         }
 
         @Override
-        public boolean isSatisfiedBy(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        protected boolean perform(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
         {
-            checkTrue(rightOperand != null, "Invalid comparison with null for operator \"%s\"", this);
-            return leftOperand != null && leftOperand.getCell(CellPath.create(rightOperand)) != null;
+            return leftOperand.getCell(CellPath.create(rightOperand)) != null;
         }
 
         @Override
@@ -445,30 +459,40 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public ThreeValued isConditionSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             // Legacy behavior of LWT conditions
             if (leftOperand == null || rightOperand == null)
-            {
-                return leftOperand != rightOperand;
-            }
+                return ThreeValued.of(leftOperand != rightOperand);
 
-            return type.compareForCQL(leftOperand, rightOperand) != 0;
+            return ThreeValued.of(perform(type, leftOperand, rightOperand));
         }
 
         @Override
-        public boolean isSatisfiedBy(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        public ThreeValued isConditionSatisfiedBy(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
         {
             // Legacy behavior of LWT conditions
             if (rightOperand == null)
-                return leftOperand != null;
+                return ThreeValued.of(leftOperand != null);
 
             List<ByteBuffer> elements = type.unpack(rightOperand);
 
             if (elements.isEmpty())
-                return leftOperand != null;
+                return ThreeValued.of(leftOperand != null);;
 
-            return leftOperand == null || type.compareCQL(leftOperand, elements) != 0;
+            return ThreeValued.of(leftOperand == null || type.compareForCQL(leftOperand, elements) != 0);
+        }
+
+        @Override
+        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return type.compareForCQL(leftOperand, rightOperand) != 0;
+        }
+
+        @Override
+        protected boolean perform(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        {
+            return type.compareForCQL(leftOperand, type.unpack(rightOperand)) != 0;
         }
 
         @Override
@@ -498,12 +522,6 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
         protected boolean isSupportedByReadPath()
         {
             return false;
@@ -518,10 +536,9 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
-            checkTrue(rightOperand != null, "Invalid comparison with null for operator \"%s\"", LIKE);
-            return leftOperand != null && ByteBufferUtil.startsWith(leftOperand, rightOperand);
+            return ByteBufferUtil.startsWith(leftOperand, rightOperand);
         }
     },
     LIKE_SUFFIX(11)
@@ -533,10 +550,9 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
-            checkTrue(rightOperand != null, "Invalid comparison with null for operator \"%s\"", LIKE);
-            return leftOperand != null && ByteBufferUtil.endsWith(leftOperand, rightOperand);
+            return ByteBufferUtil.endsWith(leftOperand, rightOperand);
         }
     },
     LIKE_CONTAINS(12)
@@ -548,10 +564,9 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
-            checkTrue(rightOperand != null, "Invalid comparison with null for operator \"%s\"", LIKE);
-            return leftOperand != null && ByteBufferUtil.contains(leftOperand, rightOperand);
+            return ByteBufferUtil.contains(leftOperand, rightOperand);
         }
     },
     LIKE_MATCHES(13)
@@ -562,19 +577,14 @@ public enum Operator
             return "LIKE '<term>'";
         }
 
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        @Override
+        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
-            return leftOperand != null && ByteBufferUtil.contains(leftOperand, rightOperand);
+            return ByteBufferUtil.contains(leftOperand, rightOperand);
         }
     },
     LIKE(14)
     {
-        @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
-        {
-            throw new UnsupportedOperationException();
-        }
-
         @Override
         public boolean requiresIndexing()
         {
@@ -583,15 +593,6 @@ public enum Operator
     },
     ANN(15)
     {
-        @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
-        {
-            // The ANN operator is only supported by the vector index so, normally, should never be called directly.
-            // In networked queries (non-local) the coordinator will end up calling the row filter directly. So, this
-            // needs to return true so that the returned values are allowed through to the VectorTopKProcessor
-            throw new UnsupportedOperationException();
-        }
-
         @Override
         public boolean requiresIndexing()
         {
@@ -646,16 +647,92 @@ public enum Operator
           throw new IOException(String.format("Cannot resolve Relation.Type from binary representation: %s", b));
     }
 
+    /**
+     * Checks whether the 2 values satisfy this condition operator (given the type they should be compared with).
+     * <p>This method exist due to a difference in behavior between LWT conditions and other restrictions.
+     * For the {@code =}, {@code !=} and {@code IN} operators LWT condition accept {@code null} values for the
+     * right operands. Long term we should deprecate that behavior and push people towards <pre>IS [NOT] NULL</pre>.</p>
+     *
+     * @param type the type of the values to compare
+     * @param leftOperand the left operand
+     * @param rightOperand the right operand
+     */
+    public ThreeValued isConditionSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+    {
+        return isSatisfiedBy(type, leftOperand, rightOperand);
+    }
 
     /**
-     * Whether 2 values satisfy this operator (given the type they should be compared with).
+     * Checks whether the 2 values satisfy this condition operator (given the type they should be compared with).
+     *
+     * @param type the type of the values to compare
+     * @param leftOperand the left operand
+     * @param rightOperand the right operand
      */
-    public abstract boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand);
+    public ThreeValued isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+    {
+        checkTrue(rightOperand != null, "Invalid comparison with null for operator \"%s\"", this);
+        if (leftOperand == null)
+            return ThreeValued.UNKOWN;
 
+        // In order to support operators on Counter types, their value has to be extracted from internal
+        // representation. See CASSANDRA-11629
+        boolean result = type.isCounter() ? perform(LongType.instance, toCounterValue(leftOperand), rightOperand)
+                                          : perform(type, leftOperand, rightOperand);
 
-    public boolean isSatisfiedBy(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        return ThreeValued.of(result);
+    }
+
+    /**
+     * Checks whether the 2 values satisfy this condition operator (given the multicell type they should be compared with).
+     * <p>This method exist due to a difference in behavior between LWT conditions and other restrictions.
+     * For the {@code =}, {@code !=} and {@code IN} operators LWT condition accept {@code null} values for the
+     * right operands. Long term we should deprecate that behavior and push people towards <pre>IS [NOT] NULL</pre>.</p>
+     *
+     * @param type the type of the values to compare
+     * @param leftOperand the left operand
+     * @param rightOperand the right operand
+     */
+    public ThreeValued isConditionSatisfiedBy(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+    {
+        return isSatisfiedBy(type, leftOperand, rightOperand);
+    }
+
+    /**
+     * Checks whether the 2 values satisfy this condition operator (given the multicell type they should be compared with).
+     *
+     * @param type the type of the values to compare
+     * @param leftOperand the left operand
+     * @param rightOperand the right operand
+     */
+    public ThreeValued isSatisfiedBy(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+    {
+        checkTrue(rightOperand != null, "Invalid comparison with null for operator \"%s\"", this);
+        if (leftOperand == null)
+            return ThreeValued.UNKOWN;
+
+        return ThreeValued.of(perform(type, leftOperand, rightOperand));
+    }
+
+    /**
+     * Perform the comparison between the left and right operands.
+     */
+    protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
     {
         throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Perform the comparison between the left and right operands.
+     */
+    protected boolean perform(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    private static ByteBuffer toCounterValue(ByteBuffer leftOperand)
+    {
+        return LongType.instance.decompose(CounterContext.instance().total(leftOperand, ByteBufferAccessor.instance));
     }
 
     public static int serializedSize()

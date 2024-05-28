@@ -200,7 +200,7 @@ public final class ColumnCondition
         @Override
         public boolean appliesTo(Row row)
         {
-            return operator.isSatisfiedBy(column.type, rowValue(row), value);
+            return operator.isConditionSatisfiedBy(column.type, rowValue(row), value).isTrue();
         }
 
         private ByteBuffer rowValue(Row row)
@@ -242,7 +242,7 @@ public final class ColumnCondition
         public boolean appliesTo(Row row)
         {
             ByteBuffer element = ((MultiElementType<?>) column.type).getElement(columnData(row), keyOrIndex);
-            return operator.isSatisfiedBy(elementType, element, value);
+            return operator.isConditionSatisfiedBy(elementType, element, value).isTrue();
         }
 
         public ColumnData columnData(Row row)
@@ -265,7 +265,7 @@ public final class ColumnCondition
         public boolean appliesTo(Row row)
         {
             ComplexColumnData columnData = row == null ? null : row.getComplexColumnData(column);
-            return operator.isSatisfiedBy((MultiElementType<?>) column.type, columnData, value);
+            return operator.isConditionSatisfiedBy((MultiElementType<?>) column.type, columnData, value).isTrue();
         }
     }
 
