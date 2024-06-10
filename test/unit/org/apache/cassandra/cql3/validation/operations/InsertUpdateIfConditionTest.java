@@ -950,4 +950,236 @@ public class InsertUpdateIfConditionTest extends CQLTester
 
         assertRows(execute("SELECT * FROM %s WHERE k = 1"), row(1, Duration.from("10s"), 6));
     }
+
+    @Test
+    public void testConditionalUpdateWithIsNotNull() throws Throwable
+    {
+        createTable(" CREATE TABLE %s (k int, c int, s int static, v int, PRIMARY KEY (k, c))");
+
+        execute("INSERT INTO %s (k, c) VALUES (?, ?)", 1, 1);
+        execute("INSERT INTO %s (k, c, v) VALUES (?, ?, ?)", 1, 2, 2);
+        execute("INSERT INTO %s (k, c, s) VALUES (?, ?, ?)", 2, 1, 2);
+        execute("INSERT INTO %s (k, c, s, v) VALUES (?, ?, ?, ?)", 3, 1, 3, 3);
+
+        // Cannot have conditions on primary key columns
+        assertInvalidMessage("PRIMARY KEY column 'k' cannot have IF conditions",
+                             "UPDATE %s SET v = 10 WHERE k = 1 AND c = 1 IF k IS NOT NULL");
+
+        assertInvalidMessage("PRIMARY KEY column 'c' cannot have IF conditions",
+                             "UPDATE %s SET v = 10 WHERE k = 1 AND c = 1 IF c IS NOT NULL");
+
+        // null regular column
+        assertRows(execute("UPDATE %s SET v = 10 WHERE k = 1 AND c = 1 IF v IS NOT NULL"),
+                   row(false, null));
+
+        // non-null regular column
+        assertRows(execute("UPDATE %s SET v = 20 WHERE k = 1 AND c = 2 IF v IS NOT NULL"),
+                   row(true));
+
+        assertRows(execute("SELECT * FROM %s WHERE k = 1 AND c = 2"),
+                   row(1, 2, null, 20));
+
+        // null static column
+        assertRows(execute("UPDATE %s SET s = 20 WHERE k = 1 IF s IS NOT NULL"),
+                   row(false, null));
+
+        // non-null static column
+        assertRows(execute("UPDATE %s SET v = 20 WHERE k = 2 AND c = 1 IF s IS NOT NULL"),
+                   row(true));
+
+        assertRows(execute("SELECT * FROM %s WHERE k = 2"),
+                   row(2, 1, 2, 20));
+
+        // non-existing row
+        assertRows(execute("UPDATE %s SET v = 40 WHERE k = 4 AND c = 1 IF v IS NOT NULL"),
+                   row(false));
+
+        createTable(" CREATE TABLE %s (k int, c int, fm frozen<map<int, int>>, m map<int, int>,  PRIMARY KEY (k, c))");
+
+        execute("INSERT INTO %s (k, c, fm, m) VALUES (?, ?, ?, ?)", 1, 1, map(1, 1, 2, 2), map(1, 1, 2, 2));
+        execute("INSERT INTO %s (k, c) VALUES (?, ?)", 1, 2);
+
+        // Map conditions
+
+        // null non-frozen map
+        assertRows(execute("UPDATE %s SET m = {10 : 10, 20 : 20} WHERE k = 1 AND c = 2 IF m IS NOT NULL"),
+                   row(false, null));
+
+        // null frozen map
+        assertRows(execute("UPDATE %s SET fm = {10 : 10, 20 : 20} WHERE k = 1 AND c = 2 IF fm IS NOT NULL"),
+                   row(false, null));
+
+        // non-null non-frozen map
+        assertRows(execute("UPDATE %s SET m = {10 : 10, 20 : 20} WHERE k = 1 AND c = 1 IF m IS NOT NULL"),
+                   row(true));
+
+        assertRows(execute("SELECT * FROM %s"),
+                   row(1, 1, map(1, 1, 2, 2), map(10, 10, 20, 20)),
+                   row(1, 2, null, null));
+
+        // non-null frozen map
+        assertRows(execute("UPDATE %s SET fm = {10 : 10, 20 : 20} WHERE k = 1 AND c = 1 IF fm IS NOT NULL"),
+                   row(true));
+
+        assertRows(execute("SELECT * FROM %s"),
+                   row(1, 1, map(10, 10, 20, 20), map(10, 10, 20, 20)),
+                   row(1, 2, null, null));
+
+        // non-existing row
+        assertRows(execute("UPDATE %s SET fm = {100 : 100, 200 : 200} WHERE k = 1 AND c = 3 IF fm IS NOT NULL"),
+                   row(false));
+
+        assertRows(execute("UPDATE %s SET m = {100 : 100, 200 : 200} WHERE k = 1 AND c = 3 IF m IS NOT NULL"),
+                   row(false));
+
+        // Map element conditions
+
+        // null non-frozen map
+        assertRows(execute("UPDATE %s SET m = {100 : 100, 200 : 200} WHERE k = 1 AND c = 2 IF m[100] IS NOT NULL"),
+                   row(false, null));
+
+        // null frozen map
+        assertRows(execute("UPDATE %s SET fm = {100 : 100, 200 : 200} WHERE k = 1 AND c = 1 IF fm[100] IS NOT NULL"),
+                   row(false, map(10, 10, 20, 20)));
+
+        // null non-frozen map element
+        assertRows(execute("UPDATE %s SET m = {100 : 100, 200 : 200} WHERE k = 1 AND c = 1 IF m[100] IS NOT NULL"),
+                   row(false, map(10, 10, 20, 20)));
+
+        // null frozen map element
+        assertRows(execute("UPDATE %s SET fm = {100 : 100, 200 : 200} WHERE k = 1 AND c = 1 IF fm[100] IS NOT NULL"),
+                   row(false, map(10, 10, 20, 20)));
+
+        // non-existing row
+        assertRows(execute("UPDATE %s SET fm = {100 : 100, 200 : 200} WHERE k = 1 AND c = 3 IF fm[100] IS NOT NULL"),
+                   row(false));
+
+        // non-null non-frozen map element
+        assertRows(execute("UPDATE %s SET m = {100 : 100, 200 : 200} WHERE k = 1 AND c = 1 IF m[10] IS NOT NULL"),
+                   row(true));
+
+        assertRows(execute("SELECT * FROM %s"),
+                   row(1, 1, map(10, 10, 20, 20), map(100, 100, 200, 200)),
+                   row(1, 2, null, null));
+
+        // non-null frozen map element
+        assertRows(execute("UPDATE %s SET fm = {100 : 100, 200 : 200} WHERE k = 1 AND c = 1 IF fm[10] IS NOT NULL"),
+                   row(true));
+
+        assertRows(execute("SELECT * FROM %s"),
+                   row(1, 1, map(100, 100, 200, 200), map(100, 100, 200, 200)),
+                   row(1, 2, null, null));
+
+        // list
+        createTable(" CREATE TABLE %s (k int, c int, fl frozen<list<int>>, l list<int>,  PRIMARY KEY (k, c))");
+
+        execute("INSERT INTO %s (k, c, fl, l) VALUES (?, ?, ?, ?)", 1, 1, list(1, 2), list(1, 2));
+        execute("INSERT INTO %s (k, c) VALUES (?, ?)", 1, 2);
+
+        // list
+
+        // null non-frozen list
+        assertRows(execute("UPDATE %s SET l = [10, 20] WHERE k = 1 AND c = 2 IF l IS NOT NULL"),
+                   row(false, null));
+
+        // null frozen list
+        assertRows(execute("UPDATE %s SET fl = [10, 20] WHERE k = 1 AND c = 2 IF fl IS NOT NULL"),
+                   row(false, null));
+
+        // non-null non-frozen list
+        assertRows(execute("UPDATE %s SET l = [10, 20] WHERE k = 1 AND c = 1 IF l IS NOT NULL"),
+                   row(true));
+
+        assertRows(execute("SELECT * FROM %s"),
+                   row(1, 1, list(1, 2), list(10, 20)),
+                   row(1, 2, null, null));
+
+        // non-null frozen list
+        assertRows(execute("UPDATE %s SET fl = [10, 20] WHERE k = 1 AND c = 1 IF fl IS NOT NULL"),
+                   row(true));
+
+        assertRows(execute("SELECT * FROM %s"),
+                   row(1, 1, list(10, 20), list(10, 20)),
+                   row(1, 2, null, null));
+
+        // non-existing row
+        assertRows(execute("UPDATE %s SET l = [100, 200] WHERE k = 1 AND c = 3 IF l IS NOT NULL"),
+                   row(false));
+
+        assertRows(execute("UPDATE %s SET fl = [100, 200] WHERE k = 1 AND c = 3 IF fl IS NOT NULL"),
+                   row(false));
+
+        // list elements
+
+        // null non-frozen list
+        assertRows(execute("UPDATE %s SET l = [100, 200] WHERE k = 1 AND c = 1 IF l[3] IS NOT NULL"),
+                   row(false, list(10, 20)));
+
+        // null frozen list
+        assertRows(execute("UPDATE %s SET fl = [100, 200] WHERE k = 1 AND c = 1 IF fl[3] IS NOT NULL"),
+                   row(false, list(10, 20)));
+
+        // non-existing row
+        assertRows(execute("UPDATE %s SET l = [100, 200] WHERE k = 1 AND c = 3 IF l[3] IS NOT NULL"),
+                   row(false));
+
+        assertRows(execute("UPDATE %s SET fl = [100, 200] WHERE k = 1 AND c = 3 IF fl[3] IS NOT NULL"),
+                   row(false));
+
+        // non-null non-frozen list
+        assertRows(execute("UPDATE %s SET l = [100, 200] WHERE k = 1 AND c = 1 IF l[0] IS NOT NULL"),
+                   row(true));
+
+        assertRows(execute("SELECT * FROM %s"),
+                   row(1, 1, list(10, 20), list(100, 200)),
+                   row(1, 2, null, null));
+
+        // non-null frozen list
+        assertRows(execute("UPDATE %s SET fl = [100, 200] WHERE k = 1 AND c = 1 IF fl[0] IS NOT NULL"),
+                   row(true));
+
+        assertRows(execute("SELECT * FROM %s"),
+                   row(1, 1, list(100, 200), list(100, 200)),
+                   row(1, 2, null, null));
+
+        createTable(" CREATE TABLE %s (k int, c int, fs frozen<set<int>>, s set<int>,  PRIMARY KEY (k, c))");
+
+        execute("INSERT INTO %s (k, c, fs, s) VALUES (?, ?, ?, ?)", 1, 1, set(1, 2), set(1, 2));
+        execute("INSERT INTO %s (k, c) VALUES (?, ?)", 1, 2);
+
+        // Set conditions
+
+        // null non-frozen set
+        assertRows(execute("UPDATE %s SET s = {10, 20} WHERE k = 1 AND c = 2 IF s IS NOT NULL"),
+                   row(false, null));
+
+        // null frozen set
+        assertRows(execute("UPDATE %s SET fs = {10, 20} WHERE k = 1 AND c = 2 IF fs IS NOT NULL"),
+                   row(false, null));
+
+        // non-null non-frozen set
+        assertRows(execute("UPDATE %s SET s = {10, 20} WHERE k = 1 AND c = 1 IF s IS NOT NULL"),
+                   row(true));
+
+        assertRows(execute("SELECT * FROM %s"),
+                   row(1, 1, set(1, 2), set(10, 20)),
+                   row(1, 2, null, null));
+
+        // non-null frozen set
+        assertRows(execute("UPDATE %s SET fs = {10, 20} WHERE k = 1 AND c = 1 IF fs IS NOT NULL"),
+                   row(true));
+
+        assertRows(execute("SELECT * FROM %s"),
+                   row(1, 1, set(10, 20), set(10, 20)),
+                   row(1, 2, null, null));
+
+        // non-existing row
+        assertRows(execute("UPDATE %s SET fs = {100, 200} WHERE k = 1 AND c = 3 IF fs IS NOT NULL"),
+                   row(false));
+
+        assertRows(execute("UPDATE %s SET s = {100, 200} WHERE k = 1 AND c = 3 IF s IS NOT NULL"),
+                   row(false));
+
+        // TODO: udf, udf field! Do not forget non existing row
+    }
 }

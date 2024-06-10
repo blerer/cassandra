@@ -84,10 +84,7 @@ public interface SingleRestriction extends Restriction
      * @param other the restriction to merge into this one
      * @return the restriction resulting of the merge
      */
-    default SingleRestriction mergeWith(SingleRestriction other)
-    {
-        return new MergedRestriction(this, (SimpleRestriction) other);
-    }
+    SingleRestriction mergeWith(SimpleRestriction other);
 
     /**
      * Returns the values selected by this restriction (or by the intersection of merged restrictions) if the operator is an {@code EQ} or an {@code IN}.

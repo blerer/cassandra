@@ -120,7 +120,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
         return expression;
     }
 
-    public void addMapEquality(ColumnMetadata def, ByteBuffer key, Operator op, ByteBuffer value)
+    public void addMapElementExpression(ColumnMetadata def, ByteBuffer key, Operator op, ByteBuffer value)
     {
         add(new MapElementExpression(def, key, op, value));
     }
@@ -402,6 +402,27 @@ public class RowFilter implements Iterable<RowFilter.Expression>
     }
 
     @Override
+    public boolean equals(Object o)
+    {
+        if (this == o)
+            return true;
+
+        if (!(o instanceof RowFilter))
+            return false;
+
+        RowFilter that = (RowFilter) o;
+
+        return Objects.equal(this.expressions, that.expressions)
+               && Objects.equal(this.needsReconciliation, that.needsReconciliation);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return Objects.hashCode(expressions, needsReconciliation);
+    }
+
+    @Override
     public String toString()
     {
         return toString(false);
@@ -482,7 +503,8 @@ public class RowFilter implements Iterable<RowFilter.Expression>
 
         public void validate()
         {
-            checkNotNull(value, "Unsupported null value for column %s", column.name);
+            if (!operator.isUnary())
+                checkNotNull(value, "Unsupported null value for column %s", column.name);
             checkBindValueSet(value, "Unsupported unset value for column %s", column.name);
         }
 
@@ -536,7 +558,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
             return Objects.equal(this.kind(), that.kind())
                 && Objects.equal(this.column.name, that.column.name)
                 && Objects.equal(this.operator, that.operator)
-                && Objects.equal(this.value, that.value);
+                && (this.operator.isUnary() || Objects.equal(this.value, that.value));
         }
 
         @Override
@@ -563,6 +585,16 @@ public class RowFilter implements Iterable<RowFilter.Expression>
 
         protected abstract String toString(boolean cql);
 
+        protected static String toString(boolean cql, ColumnIdentifier name)
+        {
+            return cql ? name.toCQLString() : name.toString();
+        }
+
+        protected static String toString(boolean cql, AbstractType<?> type, ByteBuffer value)
+        {
+            return cql ? type.toCQLString(value) : type.getString(value);
+        }
+
         private static class Serializer
         {
             public void serialize(Expression expression, DataOutputPlus out, int version) throws IOException
@@ -586,16 +618,17 @@ public class RowFilter implements Iterable<RowFilter.Expression>
 
                 ByteBufferUtil.writeWithShortLength(expression.column.name.bytes, out);
                 expression.operator.writeTo(out);
-
                 switch (expression.kind())
                 {
                     case SIMPLE:
-                        ByteBufferUtil.writeWithShortLength(expression.value, out);
+                        if (!expression.operator.isUnary())
+                            ByteBufferUtil.writeWithShortLength(expression.value, out);
                         break;
                     case MAP_ELEMENT:
                         MapElementExpression mexpr = (MapElementExpression)expression;
                         ByteBufferUtil.writeWithShortLength(mexpr.key, out);
-                        ByteBufferUtil.writeWithShortLength(mexpr.value, out);
+                        if (!expression.operator.isUnary())
+                            ByteBufferUtil.writeWithShortLength(mexpr.value, out);
                         break;
                 }
             }
@@ -627,10 +660,10 @@ public class RowFilter implements Iterable<RowFilter.Expression>
                 switch (kind)
                 {
                     case SIMPLE:
-                        return new SimpleExpression(column, operator, ByteBufferUtil.readWithShortLength(in));
+                        return new SimpleExpression(column, operator, operator.isUnary() ? null : ByteBufferUtil.readWithShortLength(in));
                     case MAP_ELEMENT:
                         ByteBuffer key = ByteBufferUtil.readWithShortLength(in);
-                        ByteBuffer value = ByteBufferUtil.readWithShortLength(in);
+                        ByteBuffer value = operator.isUnary() ? null : ByteBufferUtil.readWithShortLength(in);
                         return new MapElementExpression(column, key, operator, value);
                 }
                 throw new AssertionError();
@@ -649,12 +682,18 @@ public class RowFilter implements Iterable<RowFilter.Expression>
                 switch (expression.kind())
                 {
                     case SIMPLE:
-                        size += ByteBufferUtil.serializedSizeWithShortLength(((SimpleExpression)expression).value);
+                        if (!expression.operator.isUnary())
+                        {
+                            size += ByteBufferUtil.serializedSizeWithShortLength(((SimpleExpression) expression).value);
+                        }
                         break;
                     case MAP_ELEMENT:
                         MapElementExpression mexpr = (MapElementExpression)expression;
-                        size += ByteBufferUtil.serializedSizeWithShortLength(mexpr.key)
-                              + ByteBufferUtil.serializedSizeWithShortLength(mexpr.value);
+                        size += ByteBufferUtil.serializedSizeWithShortLength(mexpr.key);
+                        if (!expression.operator.isUnary())
+                        {
+                            size += ByteBufferUtil.serializedSizeWithShortLength(mexpr.value);
+                        }
                         break;
                     case CUSTOM:
                         size += IndexMetadata.serializer.serializedSize(((CustomExpression)expression).targetIndex, version)
@@ -683,7 +722,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
         {
             // We support null conditions for LWT (in ColumnCondition) but not for RowFilter.
             // TODO: we should try to merge both code someday.
-            assert value != null;
+            assert operator.isUnary() || value != null;
 
             if (operator.appliesToColumnValues() || !column.isComplex())
             {
@@ -720,9 +759,17 @@ public class RowFilter implements Iterable<RowFilter.Expression>
                 default:
                     break;
             }
-            return cql
-                 ? String.format("%s %s %s", column.name.toCQLString(), operator, type.toCQLString(value) )
-                 : String.format("%s %s %s", column.name.toString(), operator, type.getString(value));
+
+            StringBuilder builder = new StringBuilder().append(toString(cql, column.name))
+                                                       .append(' ')
+                                                       .append(operator);
+            if (!operator.isUnary())
+            {
+                builder.append(' ')
+                       .append(toString(cql, type, value));
+            }
+
+            return builder.toString();
         }
 
         @Override
@@ -743,7 +790,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
         public MapElementExpression(ColumnMetadata column, ByteBuffer key, Operator operator, ByteBuffer value)
         {
             super(column, operator, value);
-            assert column.type instanceof MapType && operator == Operator.EQ;
+            assert column.type instanceof MapType && (operator == Operator.EQ || operator.isUnary());
             this.key = key;
         }
 
@@ -752,8 +799,11 @@ public class RowFilter implements Iterable<RowFilter.Expression>
         {
             checkNotNull(key, "Unsupported null map key for column %s", column.name);
             checkBindValueSet(key, "Unsupported unset map key for column %s", column.name);
-            checkNotNull(value, "Unsupported null map value for column %s", column.name);
-            checkBindValueSet(value, "Unsupported unset map value for column %s", column.name);
+            if (!operator().isUnary())
+            {
+                checkNotNull(value, "Unsupported null map value for column %s", column.name);
+                checkBindValueSet(value, "Unsupported unset map value for column %s", column.name);
+            }
         }
 
         @Override
@@ -767,7 +817,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
             assert key != null;
             // We support null conditions for LWT (in ColumnCondition) but not for RowFilter.
             // TODO: we should try to merge both code someday.
-            assert value != null;
+            assert operator().isUnary() || value != null;
 
             if (row.isStatic() != column.isStatic())
                 return true;
@@ -794,10 +844,18 @@ public class RowFilter implements Iterable<RowFilter.Expression>
         {
             MapType<?, ?> mt = (MapType<?, ?>) column.type;
             AbstractType<?> nt = mt.nameComparator();
-            AbstractType<?> vt = mt.valueComparator();
-            return cql
-                 ? String.format("%s[%s] = %s", column.name.toCQLString(), nt.toCQLString(key), vt.toCQLString(value))
-                 : String.format("%s[%s] = %s", column.name.toString(), nt.getString(key), vt.getString(value));
+            StringBuilder builder = new StringBuilder().append(toString(cql, column.name))
+                                                       .append('[')
+                                                       .append(toString(cql, nt, key))
+                                                       .append("] ")
+                                                       .append(operator);
+
+            if (!operator().isUnary())
+            {
+                AbstractType<?> vt = mt.valueComparator();
+                builder.append(' ').append(toString(cql, vt, value));
+            }
+            return builder.toString();
         }
 
         @Override
@@ -812,9 +870,9 @@ public class RowFilter implements Iterable<RowFilter.Expression>
             MapElementExpression that = (MapElementExpression)o;
 
             return Objects.equal(this.column.name, that.column.name)
-                && Objects.equal(this.operator, that.operator)
                 && Objects.equal(this.key, that.key)
-                && Objects.equal(this.value, that.value);
+                && Objects.equal(this.operator, that.operator)
+                && (this.operator.isUnary() || Objects.equal(this.value, that.value));
         }
 
         @Override

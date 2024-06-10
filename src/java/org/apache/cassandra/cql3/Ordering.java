@@ -19,7 +19,6 @@
 package org.apache.cassandra.cql3;
 
 import org.apache.cassandra.cql3.restrictions.SimpleRestriction;
-import org.apache.cassandra.cql3.restrictions.SingleRestriction;
 import org.apache.cassandra.cql3.terms.Term;
 import org.apache.cassandra.cql3.terms.Terms;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -57,7 +56,7 @@ public class Ordering
             return false;
         }
 
-        public SingleRestriction toRestriction()
+        public SimpleRestriction toRestriction()
         {
             throw new UnsupportedOperationException();
         }
@@ -99,7 +98,7 @@ public class Ordering
         }
 
         @Override
-        public SingleRestriction toRestriction()
+        public SimpleRestriction toRestriction()
         {
             return new SimpleRestriction(ColumnsExpression.singleColumn(columnMetadata),
                                          Operator.ANN,

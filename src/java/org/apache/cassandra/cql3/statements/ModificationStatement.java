@@ -959,7 +959,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
         /**
          * Returns the column conditions.
          *
-         * @param metadata the column family meta data
+         * @param metadata the table meta data
          * @param bindVariables the bound names
          * @return the column conditions.
          */
@@ -973,7 +973,6 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
             {
                 ColumnCondition condition = rawCondition.prepare(metadata);
                 condition.collectMarkerSpecification(bindVariables);
-
                 builder.add(condition);
             }
             return builder.build();

@@ -22,6 +22,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableList;
+
 import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -220,6 +221,7 @@ public interface Terms
                 return false;
             }
         };
+
         /**
          * This method validates this {@code Terms.Raw} is valid for the provided column
          * specification and "prepare" this {@code Terms.Raw}, returning the resulting {@link Terms}.
@@ -285,6 +287,7 @@ public interface Terms
         {
             if (raws.isEmpty())
                 return EMPTY;
+
             return new Raw()
             {
                 @Override
@@ -402,6 +405,7 @@ public interface Terms
                 return false;
             }
         };
+
         @Override
         public void collectMarkerSpecification(VariableSpecifications boundNames) {}
 

@@ -28,6 +28,7 @@ import com.google.common.collect.ImmutableRangeSet;
 import com.google.common.collect.Range;
 import com.google.common.collect.RangeSet;
 
+import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.guardrails.Guardrails;
@@ -43,6 +44,8 @@ import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.ClusteringPrefix;
 import org.apache.cassandra.db.MultiCBuilder;
 import org.apache.cassandra.service.ClientState;
+
+import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
 /**
  * A set of restrictions on the partition key.
@@ -77,7 +80,7 @@ final class PartitionKeyRestrictions extends RestrictionSetWrapper
     }
 
     private PartitionKeyRestrictions(PartitionKeyRestrictions pkRestrictions,
-                                     SingleRestriction restriction)
+                                     SimpleRestriction restriction)
     {
         super(restriction.isOnToken() ? pkRestrictions.restrictions
                                       : pkRestrictions.restrictions.addRestriction(restriction));
@@ -87,9 +90,13 @@ final class PartitionKeyRestrictions extends RestrictionSetWrapper
                                                          : pkRestrictions.tokenRestrictions;
     }
 
-    public PartitionKeyRestrictions mergeWith(Restriction restriction)
+    public PartitionKeyRestrictions mergeWith(SimpleRestriction restriction)
     {
-        return new PartitionKeyRestrictions(this, (SingleRestriction) restriction);
+        Operator operator = restriction.operator();
+        if (restriction.isColumnLevel() && (operator == Operator.IS_NOT_NULL || operator == Operator.IS_NULL))
+            throw invalidRequest("%s is not supported on partition key columns", operator);
+
+        return new PartitionKeyRestrictions(this, restriction);
     }
 
     @Override

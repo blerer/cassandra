@@ -107,6 +107,15 @@ public final class MergedRestriction implements SingleRestriction
     }
 
     @Override
+    public SingleRestriction mergeWith(SimpleRestriction other)
+    {
+        if (other.operator() == Operator.IS_NOT_NULL)
+            return this;
+
+        return new MergedRestriction(this, other);
+    }
+
+    @Override
     public boolean isOnToken()
     {
         return isOnToken;
@@ -152,6 +161,13 @@ public final class MergedRestriction implements SingleRestriction
                     (other.operator() == Operator.LT || other.operator() == Operator.LTE))
             {
                 throw invalidRequest("More than one restriction was found for the end bound on %s",
+                                     toCQLString(getColumnsInCommons(restriction, other)));
+            }
+
+            if ((restriction.operator() == Operator.IS_NULL && other.operator() == Operator.IS_NOT_NULL) ||
+                    (restriction.operator() == Operator.IS_NOT_NULL && other.operator() == Operator.IS_NULL))
+            {
+                throw invalidRequest("Column \"%s\" cannot be restricted by IS NULL and IS NOT NULL",
                                      toCQLString(getColumnsInCommons(restriction, other)));
             }
         }

@@ -173,7 +173,7 @@ final class RestrictionSet implements Restrictions, Iterable<SingleRestriction>
      * @param restriction the restriction to add
      * @return the new set of restrictions
      */
-    public RestrictionSet addRestriction(SingleRestriction restriction)
+    public RestrictionSet addRestriction(SimpleRestriction restriction)
     {
         // RestrictionSet is immutable. Therefore, we need to clone the restrictions map.
         NavigableMap<ColumnMetadata, SingleRestriction> newRestricitons = new TreeMap<>(this.restrictions);
@@ -191,7 +191,7 @@ final class RestrictionSet implements Restrictions, Iterable<SingleRestriction>
     }
 
     private NavigableMap<ColumnMetadata, SingleRestriction> mergeRestrictions(NavigableMap<ColumnMetadata,SingleRestriction> restrictions,
-                                                                              SingleRestriction restriction)
+                                                                              SimpleRestriction restriction)
     {
         Collection<ColumnMetadata> columns = restriction.columns();
         Set<SingleRestriction> existings = getRestrictions(columns);

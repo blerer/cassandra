@@ -65,8 +65,6 @@ public class SelectSingleColumnRelationTest extends CQLTester
                              "SELECT * FROM %s WHERE c = 0 AND b IN (?)", set(0));
         assertInvalidMessage("Unsupported '!=' relation: b != 5",
                 "SELECT * FROM %s WHERE c = 0 AND b != 5");
-        assertInvalidMessage("Unsupported restriction: b IS NOT NULL",
-                "SELECT * FROM %s WHERE c = 0 AND b IS NOT NULL");
     }
 
     @Test
@@ -645,8 +643,6 @@ public class SelectSingleColumnRelationTest extends CQLTester
         assertInvalidMessage(msg, "SELECT * FROM %s WHERE b LIKE ?", udt);
         assertInvalidMessage("Unsupported '!=' relation: b != {a: 0}",
                              "SELECT * FROM %s WHERE b != {a: 0}", udt);
-        assertInvalidMessage("Unsupported restriction: b IS NOT NULL",
-                             "SELECT * FROM %s WHERE b IS NOT NULL", udt);
         assertInvalidMessage("Cannot use CONTAINS on non-collection column b",
                              "SELECT * FROM %s WHERE b CONTAINS ?", udt);
     }
@@ -803,5 +799,104 @@ public class SelectSingleColumnRelationTest extends CQLTester
         assertRows(execute("SELECT * from %s WHERE pk = ? AND c > ? AND c <= ?", 1, -4, -1),
                    row(1, -2, -2),
                    row(1, -1, -1));
+    }
+
+    @Test
+    public void testSelectIsNullAndIsNotNull() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, c int, v int, PRIMARY KEY (pk, c))");
+
+        execute("INSERT INTO %s (pk, c, v) VALUES (1, 1, 1)");
+        execute("INSERT INTO %s (pk, c, v) VALUES (1, 2, 2)");
+        execute("INSERT INTO %s (pk, c, v) VALUES (1, 3, null)");
+        execute("INSERT INTO %s (pk, c, v) VALUES (2, 1, 1)");
+        execute("INSERT INTO %s (pk, c, v) VALUES (2, 2, null)");
+
+        assertRows(execute("SELECT * from %s"),
+                   row(1, 1, 1),
+                   row(1, 2, 2),
+                   row(1, 3, null),
+                   row(2, 1, 1),
+                   row(2, 2, null));
+
+        assertInvalidMessage("IS NOT NULL is not supported on partition key columns",
+                             "SELECT * from %s WHERE pk IS NOT NULL");
+
+        assertInvalidMessage("IS NULL is not supported on partition key columns",
+                             "SELECT * from %s WHERE pk IS NULL");
+
+        assertInvalidMessage("IS NOT NULL is not supported on clustering columns",
+                             "SELECT * from %s WHERE pk = 1 AND c IS NOT NULL");
+
+        assertInvalidMessage("IS NULL is not supported on clustering columns",
+                             "SELECT * from %s WHERE pk = 1 AND c IS NULL");
+
+        assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                             "SELECT * from %s WHERE v IS NOT NULL");
+
+        assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                             "SELECT * from %s WHERE v IS NULL");
+
+        assertRows(execute("SELECT * from %s WHERE v IS NOT NULL ALLOW FILTERING"),
+                   row(1, 1, 1),
+                   row(1, 2, 2),
+                   row(2, 1, 1));
+
+        assertRows(execute("SELECT * from %s WHERE v IS NOT NULL AND v = 1 ALLOW FILTERING"),
+                   row(1, 1, 1),
+                   row(2, 1, 1));
+
+        assertRows(execute("SELECT * from %s WHERE v = 1 AND v IS NOT NULL ALLOW FILTERING"),
+                   row(1, 1, 1),
+                   row(2, 1, 1));
+
+        assertRows(execute("SELECT * from %s WHERE v IS NULL ALLOW FILTERING"),
+                   row(1, 3, null),
+                   row(2, 2, null));
+
+        assertRows(execute("SELECT * from %s WHERE pk = 1 AND v IS NOT NULL ALLOW FILTERING"),
+                   row(1, 1, 1),
+                   row(1, 2, 2));
+
+        assertRows(execute("SELECT * from %s WHERE pk = 1 AND v IS NULL ALLOW FILTERING"),
+                   row(1, 3, null));
+
+        createTable("CREATE TABLE %s (pk int, c int, m1 map<int, int>, m2 frozen<map<int, int>>, PRIMARY KEY (pk, c))");
+
+        execute("INSERT INTO %s (pk, c, m1, m2) VALUES (1, 1, {}, {})");
+        execute("INSERT INTO %s (pk, c, m1, m2) VALUES (1, 2, null, null)");
+        execute("INSERT INTO %s (pk, c, m1, m2) VALUES (1, 3, {1 : 1, 2 : 2}, {1 : 1, 2 : 2})");
+        execute("INSERT INTO %s (pk, c, m1, m2) VALUES (2, 1, null, null)");
+        execute("INSERT INTO %s (pk, c, m1, m2) VALUES (2, 2, {1 : 1, 2 : 2, 3 : 3}, {1 : 1, 2 : 2, 3 : 3})");
+
+        assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                             "SELECT * from %s WHERE m1[1] IS NOT NULL");
+
+        assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                             "SELECT * from %s WHERE m1[1] IS NULL");
+
+        assertRows(execute("SELECT * from %s WHERE m1[1] IS NOT NULL ALLOW FILTERING"),
+                   row(1, 3, map(1, 1, 2, 2), map(1, 1, 2, 2)),
+                   row(2, 2, map(1, 1, 2, 2, 3, 3), map(1, 1, 2, 2, 3, 3)));
+
+        assertRows(execute("SELECT * from %s WHERE m1[1] IS NULL ALLOW FILTERING"),
+                   row(1, 1, null, map()),
+                   row(1, 2, null, null),
+                   row(2, 1, null, null));
+
+        assertRows(execute("SELECT * from %s WHERE m1[3] IS NOT NULL ALLOW FILTERING"),
+                   row(2, 2, map(1, 1, 2, 2, 3, 3), map(1, 1, 2, 2, 3, 3)));
+
+        assertRows(execute("SELECT * from %s WHERE m1[3] IS NULL ALLOW FILTERING"),
+                   row(1, 1, null, map()),
+                   row(1, 2, null, null),
+                   row(1, 3, map(1, 1, 2, 2), map(1, 1, 2, 2)),
+                   row(2, 1, null, null));
+
+        assertInvalidMessage("Map-entry predicates on frozen map column m2 are not supported",
+                             "SELECT * from %s WHERE m2[1] IS NOT NULL");
+
+        assertInvalidMessage("Map-entry predicates on frozen map column m2 are not supported",
+                             "SELECT * from %s WHERE m2[1] IS NULL");
     }
 }

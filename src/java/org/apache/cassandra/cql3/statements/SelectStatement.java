@@ -1271,7 +1271,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                            selectables,
                                            boundNames,
                                            resultSetOrderingColumns,
-                                           restrictions.nonPKRestrictedColumns(false),
+                                           restrictions.nonPKRestrictedColumns(),
                                            hasGroupBy,
                                            isJson,
                                            returnStaticContentOnPartitionWithNoRows);
@@ -1375,7 +1375,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                                       throws InvalidRequestException
         {
             checkFalse(restrictions.hasClusteringColumnsRestrictions() ||
-                       (restrictions.hasNonPrimaryKeyRestrictions() && !restrictions.nonPKRestrictedColumns(true).stream().allMatch(ColumnMetadata::isStatic)),
+                       (restrictions.hasNonPrimaryKeyRestrictions() && !restrictions.nonPKRestrictedColumns().stream().allMatch(ColumnMetadata::isStatic)),
                        "SELECT DISTINCT with WHERE clause only supports restriction by partition key and/or static columns.");
 
             Collection<ColumnMetadata> requestedColumns = selection.getColumns();

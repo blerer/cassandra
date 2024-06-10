@@ -86,7 +86,7 @@ public class CASQuery extends SchemaStatement
         boolean first = true;
         StringBuilder casReadConditionQuery = new StringBuilder();
         casReadConditionQuery.append("SELECT ");
-        for (final ColumnCondition.Raw condition : casConditionList)
+        for (ColumnCondition.Raw condition : casConditionList)
         {
             if (!condition.containsBindMarkers())
             {

@@ -514,7 +514,7 @@ jsonInsertStatement [QualifiedName qn] returns [UpdateStatement.ParsedInsertJson
 jsonValue returns [Json.Raw value]
     : s=STRING_LITERAL { $value = new Json.Literal($s.text); }
     | ':' id=noncol_ident     { $value = newJsonBindVariables(id); }
-    | QMARK            { $value = newJsonBindVariables(null); }
+    | QMARK                   { $value = newJsonBindVariables(null); }
     ;
 
 usingClause[Attributes.Raw attrs]
@@ -1724,13 +1724,16 @@ columnCondition returns [ColumnCondition.Raw condition]
         ( op=relationType t=term       { $condition = ColumnCondition.Raw.simpleCondition(column, op, Terms.Raw.of(t)); }
         | op=containsOperator t=term   { $condition = ColumnCondition.Raw.simpleCondition(column, op, Terms.Raw.of(t)); }
         | K_IN v=singleColumnInValues  { $condition = ColumnCondition.Raw.simpleCondition(column, Operator.IN, v); }
+        | op=unaryOperator             { $condition = ColumnCondition.Raw.simpleCondition(column, op, Terms.Raw.of()); }
         | '[' element=term ']'
             ( op=relationType t=term      { $condition = ColumnCondition.Raw.collectionElementCondition(column, element, op, Terms.Raw.of(t)); }
             | K_IN v=singleColumnInValues { $condition = ColumnCondition.Raw.collectionElementCondition(column, element, Operator.IN, v); }
+            | op=unaryOperator            { $condition = ColumnCondition.Raw.collectionElementCondition(column, element, op, Terms.Raw.of()); }
             )
         | '.' field=fident
             ( op=relationType t=term      { $condition = ColumnCondition.Raw.udtFieldCondition(column, field, op, Terms.Raw.of(t)); }
             | K_IN v=singleColumnInValues { $condition = ColumnCondition.Raw.udtFieldCondition(column, field, Operator.IN, v); }
+            | op=unaryOperator            { $condition = ColumnCondition.Raw.udtFieldCondition(column, field, op, Terms.Raw.of()); }
             )
         )
     ;
@@ -1760,16 +1763,17 @@ relationType returns [Operator op]
 
 relation[WhereClause.Builder clauses]
     : name=cident
-           ( type=relationType t=term { $clauses.add(Relation.singleColumn(name, type, t)); }
-           | K_LIKE t=term { $clauses.add(Relation.singleColumn(name, Operator.LIKE, t)); }
-           | K_IS K_NOT K_NULL { $clauses.add(Relation.singleColumn(name, Operator.IS_NOT, Constants.NULL_LITERAL)); }
-           | K_IN inValue=singleColumnInValues { $clauses.add(Relation.singleColumn(name, Operator.IN, inValue)); }
-           | rt=containsOperator t=term { $clauses.add(Relation.singleColumn(name, rt, t)); }
-           )
-        | K_TOKEN l=tupleOfIdentifiers type=relationType t=term { $clauses.add(Relation.token(l, type, t)); }
-        | name=cident '[' key=term ']'
-          ( type=relationType t=term { $clauses.add(Relation.mapElement(name, key, type, t)); }
-          )
+       ( type=relationType t=term { $clauses.add(Relation.singleColumn(name, type, t)); }
+       | u=unaryOperator { $clauses.add(Relation.singleColumn(name, u, Terms.Raw.of())); }
+       | K_LIKE t=term { $clauses.add(Relation.singleColumn(name, Operator.LIKE, t)); }
+       | K_IN inValue=singleColumnInValues { $clauses.add(Relation.singleColumn(name, Operator.IN, inValue)); }
+       | rt=containsOperator t=term { $clauses.add(Relation.singleColumn(name, rt, t)); }
+       )
+    | K_TOKEN l=tupleOfIdentifiers type=relationType t=term { $clauses.add(Relation.token(l, type, t)); }
+    | name=cident '[' key=term ']'
+      ( type=relationType t=term { $clauses.add(Relation.mapElement(name, key, type, t)); }
+      | u=unaryOperator { $clauses.add(Relation.mapElement(name, key, u, Terms.Raw.of())); }
+      )
     | ids=tupleOfIdentifiers
       ( K_IN inValue=multiColumnInValues { $clauses.add(Relation.multiColumn(ids, Operator.IN, inValue)); }
       | type=relationType v=multiColumnValue {$clauses.add(Relation.multiColumn(ids, type, v)); }
@@ -1777,8 +1781,13 @@ relation[WhereClause.Builder clauses]
     | '(' relation[$clauses] ')'
     ;
 
+unaryOperator returns [Operator o]
+    : K_IS K_NULL { $o = Operator.IS_NULL; }
+    | K_IS K_NOT K_NULL { $o = Operator.IS_NOT_NULL; }
+    ;
+
 containsOperator returns [Operator o]
-    : K_CONTAINS { o = Operator.CONTAINS; } (K_KEY { o = Operator.CONTAINS_KEY; })?
+    : K_CONTAINS { $o = Operator.CONTAINS; } (K_KEY { $o = Operator.CONTAINS_KEY; })?
     ;
 
 inMarker returns [Terms.Raw marker]

@@ -669,4 +669,27 @@ public class UpdateTest extends CQLTester
                   // if error ever includes "b" its safe to update this test
                   .hasMessage("Invalid operation (a = a + 1) for non counter column a");
     }
+
+    @Test
+    public void testUpdateWithIsNotNull() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, c int, s int static, v int, PRIMARY KEY (pk, c))");
+
+        execute("INSERT INTO %s (pk, c, s, v) VALUES (1, 1, 1, 1)");
+
+        assertInvalidMessage("Some partition key parts are missing: pk",
+                             "UPDATE %s SET s = 4 WHERE pk IS NOT NULL");
+
+        execute("UPDATE %s SET s = 4 WHERE pk IS NOT NULL AND pk = 1");
+
+        assertInvalidMessage("Some clustering keys are missing: c",
+                             "UPDATE %s SET v = 4 WHERE pk = 1 AND c IS NOT NULL");
+
+        execute("UPDATE %s SET v = 4 WHERE pk = 1 AND c IS NOT NULL AND c = 1");
+        assertRows(execute("SELECT * FROM %s"),
+                   row(1, 1, 4, 4));
+
+        assertInvalidMessage("Non PRIMARY KEY columns found in where clause: s",
+                             "UPDATE %s SET s = 4 WHERE pk = 1 AND s IS NOT NULL");
+    }
 }

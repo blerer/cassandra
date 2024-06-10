@@ -513,18 +513,42 @@ public enum Operator
             return false;
         }
     },
-    IS_NOT(9)
+    IS_NOT_NULL(9)
     {
         @Override
-        public String toString()
+        public boolean isUnary()
         {
-            return "IS NOT";
+            return true;
         }
 
         @Override
-        protected boolean isSupportedByReadPath()
+        public boolean requiresFilteringOrIndexingFor(ColumnMetadata.Kind columnKind)
         {
-            return false;
+            return !columnKind.isPrimaryKeyKind();
+        }
+
+        @Override
+        public ThreeValued isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return ThreeValued.of(leftOperand != null);
+        }
+
+        @Override
+        public ThreeValued isSatisfiedBy(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        {
+            return ThreeValued.of(leftOperand != null);
+        }
+
+        @Override
+        public boolean isSupportedByRestrictionsOn(ColumnsExpression expression)
+        {
+            return expression.kind() == ColumnsExpression.Kind.SINGLE_COLUMN || expression.kind() == ColumnsExpression.Kind.ELEMENT;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "IS NOT NULL";
         }
     },
     LIKE_PREFIX(10)
@@ -598,6 +622,38 @@ public enum Operator
         {
             return true;
         }
+    },
+    IS_NULL(16)
+    {
+        @Override
+        public boolean isUnary()
+        {
+            return true;
+        }
+
+        @Override
+        public ThreeValued isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return ThreeValued.of(leftOperand == null);
+        }
+
+        @Override
+        public ThreeValued isSatisfiedBy(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        {
+            return ThreeValued.of(leftOperand == null);
+        }
+
+        @Override
+        public boolean isSupportedByRestrictionsOn(ColumnsExpression expression)
+        {
+            return expression.kind() == ColumnsExpression.Kind.SINGLE_COLUMN || expression.kind() == ColumnsExpression.Kind.ELEMENT;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "IS NULL";
+        }
     };
 
     /**
@@ -612,6 +668,15 @@ public enum Operator
     Operator(int b)
     {
         this.b = b;
+    }
+
+    /**
+     * Checks if the operator is a unary operator.
+     * @return {@code true} if the operator is a unary operator, {@code false} otherwise.
+     */
+    public boolean isUnary()
+    {
+        return false;
     }
 
     /**

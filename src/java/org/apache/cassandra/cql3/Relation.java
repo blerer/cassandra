@@ -21,8 +21,8 @@ import java.util.List;
 import java.util.Objects;
 
 import org.apache.cassandra.cql3.restrictions.SimpleRestriction;
-import org.apache.cassandra.cql3.restrictions.SingleRestriction;
-import org.apache.cassandra.cql3.terms.*;
+import org.apache.cassandra.cql3.terms.Term;
+import org.apache.cassandra.cql3.terms.Terms;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.db.marshal.MapType;
@@ -77,7 +77,7 @@ public final class Relation
     public static Relation singleColumn(ColumnIdentifier identifier, Operator operator, Term.Raw rawTerm)
     {
         assert operator != Operator.IN;
-        return new Relation(ColumnsExpression.Raw.singleColumn(identifier), operator, Terms.Raw.of(rawTerm));
+        return singleColumn(identifier, operator, Terms.Raw.of(rawTerm));
     }
 
     /**
@@ -105,6 +105,20 @@ public final class Relation
     public static Relation mapElement(ColumnIdentifier identifier, Term.Raw rawKey, Operator operator, Term.Raw rawTerm)
     {
         return new Relation(ColumnsExpression.Raw.collectionElement(identifier, rawKey), operator, Terms.Raw.of(rawTerm));
+    }
+
+    /**
+     * Creates a relation for a map element (e.g. {@code columnA[?] = ?}).
+     *
+     * @param identifier the map column identifier
+     * @param rawKey the map element key (we do not support list elements in relations yet)
+     * @param operator the relation operator
+     * @param rawTerms the terms to which the map element must be compared
+     * @return a relation for a map element.
+     */
+    public static Relation mapElement(ColumnIdentifier identifier, Term.Raw rawKey, Operator operator, Terms.Raw rawTerms)
+    {
+        return new Relation(ColumnsExpression.Raw.collectionElement(identifier, rawKey), operator, rawTerms);
     }
 
     /**
@@ -165,7 +179,7 @@ public final class Relation
      * @return the <code>Restriction</code> corresponding to this <code>Relation</code>
      * @throws InvalidRequestException if this <code>Relation</code> is not valid
      */
-    public SingleRestriction toRestriction(TableMetadata table, VariableSpecifications boundNames)
+    public SimpleRestriction toRestriction(TableMetadata table, VariableSpecifications boundNames)
     {
         if (operator == Operator.NEQ)
             throw invalidRequest("Unsupported '!=' relation: %s", this);

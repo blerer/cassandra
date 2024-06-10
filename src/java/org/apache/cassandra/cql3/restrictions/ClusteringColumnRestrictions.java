@@ -23,6 +23,7 @@ import javax.annotation.Nullable;
 
 import com.google.common.collect.RangeSet;
 
+import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
@@ -67,7 +68,12 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
 
     public ClusteringColumnRestrictions mergeWith(Restriction restriction, @Nullable IndexRegistry indexRegistry) throws InvalidRequestException
     {
-        SingleRestriction newRestriction = (SingleRestriction) restriction;
+        SimpleRestriction newRestriction = (SimpleRestriction) restriction;
+
+        Operator operator = newRestriction.operator();
+        if (newRestriction.isColumnLevel() && (operator == Operator.IS_NOT_NULL || operator == Operator.IS_NULL))
+            throw invalidRequest("%s is not supported on clustering columns", operator);
+
         RestrictionSet newRestrictionSet = restrictions.addRestriction(newRestriction);
 
         if (!isEmpty() && !allowFiltering && (indexRegistry == null || !newRestriction.hasSupportingIndex(indexRegistry)))

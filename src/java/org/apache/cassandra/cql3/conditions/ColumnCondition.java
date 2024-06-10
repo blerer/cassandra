@@ -135,6 +135,9 @@ public final class ColumnCondition
 
     private ByteBuffer toValue(AbstractType<?> type, List<ByteBuffer> values)
     {
+        if (operator.isUnary())
+            return null;
+
         if (operator.isIN())
             return ListType.getInstance(type, false).pack(values);
 
