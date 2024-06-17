@@ -113,7 +113,6 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(SelectStatement.logger, 1, TimeUnit.MINUTES);
 
     public static final int DEFAULT_PAGE_SIZE = 10000;
-    public static final String TOPK_CONSISTENCY_LEVEL_ERROR = "Top-K queries can only be run with consistency level ONE/LOCAL_ONE. Consistency level %s was used.";
     public static final String TOPK_LIMIT_ERROR = "Top-K queries must have a limit specified and the limit must be less than the query page size";
     public static final String TOPK_PARTITION_LIMIT_ERROR = "Top-K queries do not support per-partition limits";
     public static final String TOPK_AGGREGATION_ERROR = "Top-K queries can not be run with aggregation";
@@ -286,11 +285,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
     public ResultMessage.Rows execute(QueryState state, QueryOptions options, Dispatcher.RequestTime requestTime)
     {
-        ConsistencyLevel cl = options.getConsistency();
-        checkNotNull(cl, "Invalid empty consistency level");
-
-        cl.validateForRead();
-        Guardrails.readConsistencyLevels.guard(EnumSet.of(cl), state.getClientState());
+        validateConsistencyLevel(options, state.getClientState(), restrictions.isTopK());
+        options = downgradeConsistencyLevelIfNeeded(options, restrictions.isTopK());
 
         long nowInSec = options.getNowInSeconds(state);
         int userLimit = getLimit(options);
@@ -305,23 +301,6 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         // Handle additional validation for topK queries
         if (restrictions.isTopK())
         {
-            checkFalse(aggregationSpec != null, TOPK_AGGREGATION_ERROR);
-
-            // We aren't going to allow SERIAL at all, so we can error out on those.
-            checkFalse(options.getConsistency() == ConsistencyLevel.LOCAL_SERIAL ||
-                       options.getConsistency() == ConsistencyLevel.SERIAL,
-                       String.format(TOPK_CONSISTENCY_LEVEL_ERROR, options.getConsistency()));
-
-            if (options.getConsistency().needsReconciliation())
-            {
-                ConsistencyLevel supplied = options.getConsistency();
-                ConsistencyLevel downgrade = supplied.isDatacenterLocal() ? ConsistencyLevel.LOCAL_ONE : ConsistencyLevel.ONE;
-
-                options = QueryOptions.withConsistencyLevel(options, downgrade);
-
-                ClientWarn.instance.warn(String.format(TOPK_CONSISTENCY_LEVEL_WARNING, supplied, downgrade));
-            }
-
             checkFalse(limit.isUnlimited(), TOPK_LIMIT_ERROR);
 
             checkFalse(limit.perPartitionCount() != DataLimits.NO_LIMIT, TOPK_PARTITION_LIMIT_ERROR);
@@ -351,7 +330,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             QueryPager pager = getPager(query, options);
 
             rows = execute(state,
-                           Pager.forDistributedQuery(pager, cl, state.getClientState()),
+                           Pager.forDistributedQuery(pager, options.getConsistency(), state.getClientState()),
                            options,
                            selectors,
                            pageSize,
@@ -365,6 +344,48 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             ClientRequestSizeMetrics.recordReadResponseMetrics(rows, restrictions, selection);
 
         return rows;
+    }
+
+    /**
+     * Validates that the consistency level can be used by this SELECT query.
+     *
+     * @param options the query options
+     * @param state the client state
+     * @param isTopK specify if the query is a Top-K query
+     * @throws InvalidRequestException if the consistency leve is invalid
+     */
+    private void validateConsistencyLevel(QueryOptions options, ClientState state, boolean isTopK)
+    {
+        ConsistencyLevel cl = checkNotNull(options.getConsistency(), "Invalid empty consistency level");
+        cl.validateForRead(isTopK);
+
+        Guardrails.readConsistencyLevels.guard(EnumSet.of(cl), state);
+    }
+
+    /**
+     * Downgrade the consistency level to LOCAL_ONE or ONE if needed.
+     *
+     * @param options the query options
+     * @return the existing query options or the query options with the new consistency level if it has been downgraded.
+     */
+    private QueryOptions downgradeConsistencyLevelIfNeeded(QueryOptions options, boolean isTopK)
+    {
+        return isTopK && options.getConsistency().needsReconciliation() ? downgradeConsistencyLevel(options)
+                                                                        : options;
+    }
+
+    /**
+     * Downgrade the consistency level to LOCAL_ONE or ONE
+     * @param options the query options
+     * @return the query options with the new consitency level.
+     */
+    private static QueryOptions downgradeConsistencyLevel(QueryOptions options)
+    {
+        ConsistencyLevel supplied = options.getConsistency();
+        ConsistencyLevel downgrade = supplied.isDatacenterLocal() ? ConsistencyLevel.LOCAL_ONE : ConsistencyLevel.ONE;
+
+        ClientWarn.instance.warn(String.format(TOPK_CONSISTENCY_LEVEL_WARNING, supplied, downgrade));
+        return QueryOptions.withConsistencyLevel(options, downgrade);
     }
 
     public AggregationSpecification getAggregationSpec(QueryOptions options)
@@ -867,17 +888,17 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             cqlPerPartitionLimit = perPartitionLimit;
         }
 
-        // Group by and aggregation queries will always be paged internally to avoid OOM.
-        // If the user provided a pageSize we'll use that to page internally (because why not), otherwise we use our default
-        if (pageSize <= 0)
-            pageSize = DEFAULT_PAGE_SIZE;
-
         // Aggregation queries work fine on top of the group by paging but to maintain
         // backward compatibility we need to use the old way.
         if (aggregationSpec != null && aggregationSpec != AggregationSpecification.AGGREGATE_EVERYTHING)
         {
             if (parameters.isDistinct)
                 return DataLimits.distinctLimits(cqlRowLimit);
+
+            // Group by and aggregation queries will always be paged internally to avoid OOM.
+            // If the user provided a pageSize we'll use that to page internally (because why not), otherwise we use our default
+            if (pageSize <= 0)
+                pageSize = DEFAULT_PAGE_SIZE;
 
             return DataLimits.groupByLimits(cqlRowLimit,
                                             cqlPerPartitionLimit,
@@ -1217,6 +1238,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             checkFalse(aggregationSpecFactory == AggregationSpecification.AGGREGATE_EVERYTHING_FACTORY
                        && perPartitionLimit != null,
                        "PER PARTITION LIMIT is not allowed with aggregate queries.");
+
+            checkFalse(restrictions.isTopK() && aggregationSpecFactory != null, TOPK_AGGREGATION_ERROR);
 
             ColumnComparator<List<ByteBuffer>> orderingComparator = null;
             boolean isReversed = false;

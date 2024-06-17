@@ -30,6 +30,7 @@ import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.NetworkTopologyStrategy;
 import org.apache.cassandra.transport.ProtocolException;
 
+import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 import static org.apache.cassandra.locator.Replicas.addToCountPerDc;
 
 public enum ConsistencyLevel
@@ -205,12 +206,21 @@ public enum ConsistencyLevel
         return isDCLocal;
     }
 
-    public void validateForRead() throws InvalidRequestException
+    /**
+     * Checks if this consistency level is supported for reads.
+     * @param isTopK {@code true} if the query is a top K query.
+     * @throws InvalidRequestException if the consistency level is invalid
+     */
+    public void validateForRead(boolean isTopK) throws InvalidRequestException
     {
         switch (this)
         {
             case ANY:
-                throw new InvalidRequestException("ANY ConsistencyLevel is only supported for writes");
+                throw invalidRequest("ANY ConsistencyLevel is only supported for writes");
+            case SERIAL:
+            case LOCAL_SERIAL:
+                if (isTopK)
+                    throw invalidRequest("Top-K queries do not support %s consistency level.", this);
         }
     }
 

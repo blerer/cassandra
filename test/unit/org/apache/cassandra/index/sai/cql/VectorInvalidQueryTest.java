@@ -398,11 +398,11 @@ public class VectorInvalidQueryTest extends SAITester
 
         assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY v ANN OF [2] LIMIT 3", ConsistencyLevel.SERIAL))
             .isInstanceOf(InvalidRequestException.class)
-            .hasMessage(String.format(SelectStatement.TOPK_CONSISTENCY_LEVEL_ERROR, ConsistencyLevel.SERIAL));
+            .hasMessage("Top-K queries do not support SERIAL consistency level.");
 
         assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY v ANN OF [2] LIMIT 3", ConsistencyLevel.LOCAL_SERIAL))
             .isInstanceOf(InvalidRequestException.class)
-            .hasMessage(String.format(SelectStatement.TOPK_CONSISTENCY_LEVEL_ERROR, ConsistencyLevel.LOCAL_SERIAL));
+            .hasMessage("Top-K queries do not support LOCAL_SERIAL consistency level.");
     }
 
     protected ResultSet execute(String query, ConsistencyLevel consistencyLevel)
