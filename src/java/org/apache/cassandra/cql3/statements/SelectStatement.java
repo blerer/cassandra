@@ -74,9 +74,6 @@ import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageProxy;
-import org.apache.cassandra.service.pager.AggregationQueryPager;
-import org.apache.cassandra.service.pager.PagingState;
-import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
@@ -285,61 +282,56 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
     public ResultMessage.Rows execute(QueryState state, QueryOptions options, Dispatcher.RequestTime requestTime)
     {
-        validateConsistencyLevel(options, state.getClientState(), restrictions.isTopK());
+        ClientState clientState = state.getClientState();
+        validateConsistencyLevel(options, clientState, restrictions.isTopK());
         options = downgradeConsistencyLevelIfNeeded(options, restrictions.isTopK());
 
         long nowInSec = options.getNowInSeconds(state);
+
         int userLimit = getLimit(options);
         int userPerPartitionLimit = getPerPartitionLimit(options);
         int pageSize = options.getPageSize();
-        boolean unmask = !table.hasMaskedColumns() || state.getClientState().hasTablePermission(table, Permission.UNMASK);
-
-        Selectors selectors = selection.newSelectors(options);
-        AggregationSpecification aggregationSpec = getAggregationSpec(options);
-        DataLimits limit = getDataLimits(userLimit, userPerPartitionLimit, pageSize, aggregationSpec);
 
         // Handle additional validation for topK queries
         if (restrictions.isTopK())
         {
-            checkFalse(limit.isUnlimited(), TOPK_LIMIT_ERROR);
+            checkFalse(userLimit != DataLimits.NO_LIMIT, TOPK_LIMIT_ERROR);
+            checkFalse(userPerPartitionLimit != DataLimits.NO_LIMIT, TOPK_PARTITION_LIMIT_ERROR);
 
-            checkFalse(limit.perPartitionCount() != DataLimits.NO_LIMIT, TOPK_PARTITION_LIMIT_ERROR);
-
-            if (pageSize > 0 && pageSize < limit.count())
+            if (pageSize > 0 && pageSize < userLimit)
             {
                 int oldPageSize = pageSize;
-                pageSize = limit.count();
-                limit = getDataLimits(userLimit, userPerPartitionLimit, pageSize, aggregationSpec);
+                pageSize = userLimit;
                 options = QueryOptions.withPageSize(options, pageSize);
-                ClientWarn.instance.warn(String.format(TOPK_PAGE_SIZE_WARNING, oldPageSize, limit.count(), pageSize));
+                ClientWarn.instance.warn(String.format(TOPK_PAGE_SIZE_WARNING, oldPageSize, userLimit, pageSize));
             }
         }
 
-        ReadQuery query = getQuery(options, state.getClientState(), selectors.getColumnFilter(), nowInSec, limit);
+        AggregationSpecification aggregationSpec = getAggregationSpec(options);
+
+        DataLimits limit = getDataLimits(userLimit, userPerPartitionLimit, pageSize, aggregationSpec);
+
+        Selectors selectors = selection.newSelectors(options);
+        ReadQuery query = getQuery(options, clientState, selectors.getColumnFilter(), nowInSec, limit);
 
         if (options.isReadThresholdsEnabled())
             query.trackWarnings();
-        ResultMessage.Rows rows;
 
-        if (aggregationSpec == null && (pageSize <= 0 || (query.limits().count() <= pageSize) || query.isTopK()))
-        {
-            rows = execute(query, options, state.getClientState(), selectors, nowInSec, userLimit, null, requestTime, unmask);
-        }
-        else
-        {
-            QueryPager pager = getPager(query, options);
+        Pager pager = Pager.forDistributedQuery(query, options, clientState, aggregationSpec != null);
 
-            rows = execute(state,
-                           Pager.forDistributedQuery(pager, options.getConsistency(), state.getClientState()),
-                           options,
-                           selectors,
-                           pageSize,
-                           nowInSec,
-                           userLimit,
-                           aggregationSpec,
-                           requestTime,
-                           unmask);
-        }
+
+        boolean unmask = !table.hasMaskedColumns() || clientState.hasTablePermission(table, Permission.UNMASK);
+
+        ResultMessage.Rows rows = execute(clientState,
+                                          pager,
+                                          options,
+                                          selectors,
+                                          nowInSec,
+                                          userLimit,
+                                          aggregationSpec,
+                                          requestTime,
+                                          unmask);
+
         if (!SchemaConstants.isSystemKeyspace(table.keyspace))
             ClientRequestSizeMetrics.recordReadResponseMetrics(rows, restrictions, selection);
 
@@ -439,108 +431,22 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         return getSliceCommands(options, state, columnFilter, limit, nowInSec);
     }
 
-    private ResultMessage.Rows execute(ReadQuery query,
-                                       QueryOptions options,
-                                       ClientState state,
-                                       Selectors selectors,
-                                       long nowInSec,
-                                       int userLimit,
-                                       AggregationSpecification aggregationSpec,
-                                       Dispatcher.RequestTime requestTime,
-                                       boolean unmask)
-    {
-        try (PartitionIterator data = query.execute(options.getConsistency(), state, requestTime))
-        {
-            return processResults(data, options, selectors, nowInSec, userLimit, aggregationSpec, unmask, state);
-        }
-    }
-
     @Override
     public AuditLogContext getAuditLogContext()
     {
         return new AuditLogContext(AuditLogEntryType.SELECT, keyspace(), table.name);
     }
 
-    // Simple wrapper class to avoid some code duplication
-    private static abstract class Pager
-    {
-        protected QueryPager pager;
-
-        protected Pager(QueryPager pager)
-        {
-            this.pager = pager;
-        }
-
-        public static Pager forInternalQuery(QueryPager pager, ReadExecutionController executionController)
-        {
-            return new InternalPager(pager, executionController);
-        }
-
-        public static Pager forDistributedQuery(QueryPager pager, ConsistencyLevel consistency, ClientState clientState)
-        {
-            return new NormalPager(pager, consistency, clientState);
-        }
-
-        public boolean isExhausted()
-        {
-            return pager.isExhausted();
-        }
-
-        public PagingState state()
-        {
-            return pager.state();
-        }
-
-        public abstract PartitionIterator fetchPage(int pageSize, Dispatcher.RequestTime requestTime);
-
-        public static class NormalPager extends Pager
-        {
-            private final ConsistencyLevel consistency;
-            private final ClientState clientState;
-
-            private NormalPager(QueryPager pager, ConsistencyLevel consistency, ClientState clientState)
-            {
-                super(pager);
-                this.consistency = consistency;
-                this.clientState = clientState;
-            }
-
-            public PartitionIterator fetchPage(int pageSize, Dispatcher.RequestTime requestTime)
-            {
-                return pager.fetchPage(pageSize, consistency, clientState, requestTime);
-            }
-        }
-
-        public static class InternalPager extends Pager
-        {
-            private final ReadExecutionController executionController;
-
-            private InternalPager(QueryPager pager, ReadExecutionController executionController)
-            {
-                super(pager);
-                this.executionController = executionController;
-            }
-
-            public PartitionIterator fetchPage(int pageSize, Dispatcher.RequestTime requestTime)
-            {
-                return pager.fetchPageInternal(pageSize, executionController);
-            }
-        }
-    }
-
-    private ResultMessage.Rows execute(QueryState state,
+    private ResultMessage.Rows execute(ClientState state,
                                        Pager pager,
                                        QueryOptions options,
                                        Selectors selectors,
-                                       int pageSize,
                                        long nowInSec,
                                        int userLimit,
                                        AggregationSpecification aggregationSpec,
                                        Dispatcher.RequestTime requestTime,
                                        boolean unmask)
     {
-        Guardrails.pageSize.guard(pageSize, table(), false, state.getClientState());
-
         if (aggregationSpecFactory != null)
         {
             if (!restrictions.hasPartitionKeyRestrictions())
@@ -559,19 +465,20 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
         // We can't properly do post-query ordering if we page (see #6722)
         // For GROUP BY or aggregation queries we always page internally even if the user has turned paging off
-        checkFalse(pageSize > 0 && needsPostQueryOrdering(),
+        checkFalse(pager.isUserPagingEnabled() && needsPostQueryOrdering(),
                   "Cannot page queries with both ORDER BY and a IN restriction on the partition key;"
                   + " you must either remove the ORDER BY or the IN and sort client side, or disable paging for this query");
 
         ResultMessage.Rows msg;
-        try (PartitionIterator page = pager.fetchPage(pageSize, requestTime))
+        try (PartitionIterator page = pager.fetchPage(requestTime))
         {
-            msg = processResults(page, options, selectors, nowInSec, userLimit, aggregationSpec, unmask, state.getClientState());
+            ResultSet rset = process(page, options, selectors, nowInSec, userLimit, aggregationSpec, unmask, state);
+            msg = new ResultMessage.Rows(rset);
         }
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
         // shouldn't be moved inside the 'try' above.
-        if (!pager.isExhausted() && !pager.pager.isTopK())
+        if (!pager.isExhausted())
             msg.result.metadata.setHasMorePages(pager.state());
 
         return msg;
@@ -581,19 +488,6 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     {
         logger.warn(msg);
         ClientWarn.instance.warn(msg);
-    }
-
-    private ResultMessage.Rows processResults(PartitionIterator partitions,
-                                              QueryOptions options,
-                                              Selectors selectors,
-                                              long nowInSec,
-                                              int userLimit,
-                                              AggregationSpecification aggregationSpec,
-                                              boolean unmask,
-                                              ClientState state) throws RequestValidationException
-    {
-        ResultSet rset = process(partitions, options, selectors, nowInSec, userLimit, aggregationSpec, unmask, state);
-        return new ResultMessage.Rows(rset);
     }
 
     public ResultMessage.Rows executeLocally(QueryState state, QueryOptions options) throws RequestExecutionException, RequestValidationException
@@ -606,15 +500,16 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                               long nowInSec,
                                               Dispatcher.RequestTime requestTime)
     {
+        ClientState clientState = state.getClientState();
         int userLimit = getLimit(options);
         int userPerPartitionLimit = getPerPartitionLimit(options);
         int pageSize = options.getPageSize();
-        boolean unmask = state.getClientState().hasTablePermission(table, Permission.UNMASK);
+        boolean unmask = clientState.hasTablePermission(table, Permission.UNMASK);
 
         Selectors selectors = selection.newSelectors(options);
         AggregationSpecification aggregationSpec = getAggregationSpec(options);
         ReadQuery query = getQuery(options,
-                                   state.getClientState(),
+                                   clientState,
                                    selectors.getColumnFilter(),
                                    nowInSec,
                                    userLimit,
@@ -624,37 +519,18 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
         try (ReadExecutionController executionController = query.executionController())
         {
-            if (aggregationSpec == null && (pageSize <= 0 || (query.limits().count() <= pageSize) || query.isTopK()))
-            {
-                try (PartitionIterator data = query.executeInternal(executionController))
-                {
-                    return processResults(data, options, selectors, nowInSec, userLimit, null, unmask, state.getClientState());
-                }
-            }
+            Pager pager = Pager.forInternalQuery(query, options, clientState, aggregationSpec != null, executionController);
 
-            QueryPager pager = getPager(query, options);
-
-            return execute(state,
-                           Pager.forInternalQuery(pager, executionController),
+            return execute(clientState,
+                           pager,
                            options,
                            selectors,
-                           pageSize,
                            nowInSec,
                            userLimit,
                            aggregationSpec,
                            requestTime,
                            unmask);
         }
-    }
-
-    private QueryPager getPager(ReadQuery query, QueryOptions options)
-    {
-        QueryPager pager = query.getPager(options.getPagingState(), options.getProtocolVersion());
-
-        if (aggregationSpecFactory == null || query.isEmpty())
-            return pager;
-
-        return new AggregationQueryPager(pager, query.limits());
     }
 
     public Map<DecoratedKey, List<Row>> executeRawInternal(QueryOptions options, ClientState state, long nowInSec) throws RequestExecutionException, RequestValidationException

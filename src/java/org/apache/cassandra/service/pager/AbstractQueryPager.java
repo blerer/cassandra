@@ -66,7 +66,7 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
             return EmptyIterators.partition();
 
         pageSize = Math.min(pageSize, remaining);
-        Pager pager = new RowPager(limits.forPaging(pageSize), query.nowInSec());
+        Pager<RowIterator> pager = new RowPager(limits.forPaging(pageSize), query.nowInSec());
         ReadQuery readQuery = nextPageReadQuery(pageSize);
         if (readQuery == null)
         {
@@ -108,7 +108,33 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
         return Transformation.apply(readQuery.executeLocally(executionController), pager);
     }
 
-    private class UnfilteredPager extends Pager<Unfiltered>
+    protected void restoreState(DecoratedKey lastKey, int remaining, int remainingInPartition)
+    {
+        this.lastKey = lastKey;
+        this.remaining = remaining;
+        this.remainingInPartition = remainingInPartition;
+    }
+
+    public boolean isExhausted()
+    {
+        return exhausted || remaining == 0 || ((this instanceof SinglePartitionPager) && remainingInPartition == 0);
+    }
+
+    public int maxRemaining()
+    {
+        return remaining;
+    }
+
+    protected int remainingInPartition()
+    {
+        return remainingInPartition;
+    }
+
+    protected abstract T nextPageReadQuery(int pageSize);
+    protected abstract void recordLast(DecoratedKey key, Row row);
+    protected abstract boolean isPreviouslyReturnedPartition(DecoratedKey key);
+
+    private class UnfilteredPager extends Pager<UnfilteredRowIterator>
     {
 
         private UnfilteredPager(DataLimits pageLimits, long nowInSec)
@@ -116,13 +142,13 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
             super(pageLimits, nowInSec);
         }
 
-        protected BaseRowIterator<Unfiltered> apply(BaseRowIterator<Unfiltered> partition)
+        protected UnfilteredRowIterator apply(UnfilteredRowIterator partition)
         {
-            return Transformation.apply(counter.applyTo((UnfilteredRowIterator) partition), this);
+            return Transformation.apply(counter.applyTo(partition), this);
         }
     }
 
-    private class RowPager extends Pager<Row>
+    private class RowPager extends Pager<RowIterator>
     {
 
         private RowPager(DataLimits pageLimits, long nowInSec)
@@ -130,13 +156,13 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
             super(pageLimits, nowInSec);
         }
 
-        protected BaseRowIterator<Row> apply(BaseRowIterator<Row> partition)
+        protected RowIterator apply(RowIterator partition)
         {
-            return Transformation.apply(counter.applyTo((RowIterator) partition), this);
+            return Transformation.apply(counter.applyTo(partition), this);
         }
     }
 
-    private abstract class Pager<T extends Unfiltered> extends Transformation<BaseRowIterator<T>>
+    private abstract class Pager<I extends BaseRowIterator<?>> extends Transformation<I>
     {
         private final DataLimits pageLimits;
         protected final DataLimits.Counter counter;
@@ -151,7 +177,7 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
         }
 
         @Override
-        public BaseRowIterator<T> applyToPartition(BaseRowIterator<T> partition)
+        public I applyToPartition(I partition)
         {
             currentKey = partition.partitionKey();
 
@@ -173,7 +199,7 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
             return apply(partition);
         }
 
-        protected abstract BaseRowIterator<T> apply(BaseRowIterator<T> partition);
+        protected abstract I apply(I partition);
 
         @Override
         public void onClose()
@@ -224,30 +250,4 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
             return row;
         }
     }
-
-    protected void restoreState(DecoratedKey lastKey, int remaining, int remainingInPartition)
-    {
-        this.lastKey = lastKey;
-        this.remaining = remaining;
-        this.remainingInPartition = remainingInPartition;
-    }
-
-    public boolean isExhausted()
-    {
-        return exhausted || remaining == 0 || ((this instanceof SinglePartitionPager) && remainingInPartition == 0);
-    }
-
-    public int maxRemaining()
-    {
-        return remaining;
-    }
-
-    protected int remainingInPartition()
-    {
-        return remainingInPartition;
-    }
-
-    protected abstract T nextPageReadQuery(int pageSize);
-    protected abstract void recordLast(DecoratedKey key, Row row);
-    protected abstract boolean isPreviouslyReturnedPartition(DecoratedKey key);
 }
