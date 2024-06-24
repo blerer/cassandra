@@ -173,8 +173,7 @@ public class View
                                                  parameters,
                                                  selectClause(),
                                                  definition.whereClause,
-                                                 null,
-                                                 null);
+                                                  Limits.Raw.NO_LIMIT);
 
             rawSelect.setBindVariables(Collections.emptyList());
 

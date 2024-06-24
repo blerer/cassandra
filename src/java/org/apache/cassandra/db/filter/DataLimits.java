@@ -45,6 +45,12 @@ public abstract class DataLimits
 {
     public static final Serializer serializer = new Serializer();
 
+    /**
+     * The default page size for internal aggregation paging.
+     */
+    public static final int DEFAULT_PAGE_SIZE = 10000;
+
+
     public static final int NO_LIMIT = Integer.MAX_VALUE;
 
     public static final DataLimits NONE = new CQLLimits(NO_LIMIT)
@@ -92,6 +98,56 @@ public abstract class DataLimits
         @Deprecated(since = "4.0") SUPER_COLUMN_COUNTING_LIMIT, //Deprecated and unused in 4.0, stop publishing in 5.0, reclaim in 6.0
         CQL_GROUP_BY_LIMIT,
         CQL_GROUP_BY_PAGING_LIMIT,
+    }
+
+    /**
+     * Creates the {@link DataLimits} corresponding to the specified .
+     *
+     * @param limit the total row limit
+     * @param perPartitionLimit the row limit per partitions
+     * @param pageSize the page size
+     * @param isDistinct {@code true} if the query is a DISTINCT query, {@code false} otherwise.
+     * @param isPostSorted {@code true} if the LIMIT should be ignored, {@code false} otherwise.
+     * @param aggregationSpec the aggregation being performed by the query
+     * @return the {@link DataLimits} corresponding to those {@code Limits}.
+     */
+    public static DataLimits limitsFor(int limit,
+                                       int perPartitionLimit,
+                                       int pageSize,
+                                       boolean isDistinct,
+                                       AggregationSpecification aggregationSpec)
+    {
+        int cqlRowLimit = NO_LIMIT;
+        int cqlPerPartitionLimit = NO_LIMIT;
+
+        if (aggregationSpec != AggregationSpecification.AGGREGATE_EVERYTHING)
+        {
+            cqlRowLimit = limit;
+            cqlPerPartitionLimit = perPartitionLimit;
+        }
+
+        // Aggregation queries work fine on top of the group by paging but to maintain
+        // backward compatibility we need to use the old way.
+        if (aggregationSpec != null && aggregationSpec != AggregationSpecification.AGGREGATE_EVERYTHING)
+        {
+            if (isDistinct)
+                return distinctLimits(cqlRowLimit);
+
+            // Group by and aggregation queries will always be paged internally to avoid OOM.
+            // If the user provided a pageSize we'll use that to page internally (because why not), otherwise we use our default
+            if (pageSize <= 0)
+                pageSize = DEFAULT_PAGE_SIZE;
+
+            return groupByLimits(cqlRowLimit,
+                                 cqlPerPartitionLimit,
+                                 pageSize,
+                                 aggregationSpec);
+        }
+
+        if (isDistinct)
+            return cqlRowLimit == DataLimits.NO_LIMIT ? DataLimits.DISTINCT_NONE : DataLimits.distinctLimits(cqlRowLimit);
+
+        return DataLimits.cqlLimits(cqlRowLimit, cqlPerPartitionLimit);
     }
 
     public static DataLimits cqlLimits(int cqlRowLimit)

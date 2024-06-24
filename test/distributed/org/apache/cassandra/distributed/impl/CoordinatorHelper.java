@@ -68,7 +68,7 @@ public class CoordinatorHelper
                                                  QueryOptions.create(toCassandraCL(commitConsistencyLevel),
                                                                      boundBBValues,
                                                                      false,
-                                                                     Integer.MAX_VALUE,
+                                                                     -1,
                                                                      null,
                                                                      toCassandraSerialCL(serialConsistencyLevel),
                                                                      ProtocolVersion.CURRENT,

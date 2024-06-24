@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.cql3;
 
+import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.ReadQuery;
 import org.apache.cassandra.db.guardrails.Guardrails;
@@ -89,16 +90,17 @@ public final class Pager
     public static Pager forDistributedQuery(ReadQuery query, QueryOptions options, ClientState state, boolean forAggregation)
     {
         int pageSize = options.getPageSize();
+        ConsistencyLevel cl = options.getConsistency();
         boolean isUserPagingEnabled = pageSize > 0;
 
         if (shouldPagingBeDisabled(query, forAggregation, pageSize))
-            return new Pager(null, t -> query.execute(options.getConsistency(), state, t), isUserPagingEnabled);
+            return new Pager(null, t -> query.execute(cl, state, t), isUserPagingEnabled);
 
         Guardrails.pageSize.guard(pageSize, query.metadata().name, false, state);
 
         QueryPager queryPager = queryPager(query, options, forAggregation);
 
-        return new Pager(queryPager, t -> queryPager.fetchPage(pageSize, options.getConsistency(), state, t), isUserPagingEnabled);
+        return new Pager(queryPager, t -> queryPager.fetchPage(pageSize, cl, state, t), isUserPagingEnabled);
     }
 
     /**

@@ -581,7 +581,8 @@ public class QueryProcessor implements QueryHandler
 
         SelectStatement select = (SelectStatement)prepared.statement;
         long nowInSec = FBUtilities.nowInSeconds();
-        QueryPager pager = select.getQuery(makeInternalOptionsWithNowInSec(prepared.statement, nowInSec, values), nowInSec).getPager(null, ProtocolVersion.CURRENT);
+        ReadQuery readQuery = select.getQuery(makeInternalOptionsWithNowInSec(prepared.statement, nowInSec, values), nowInSec);
+        QueryPager pager = readQuery.getPager(null, ProtocolVersion.CURRENT);
         return UntypedResultSet.create(select, pager, pageSize);
     }
 
