@@ -32,7 +32,6 @@ import java.util.UUID;
 import org.junit.Test;
 
 import org.junit.Assert;
-import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.UUIDGen;
 import org.slf4j.Logger;
@@ -48,7 +47,7 @@ public class UUIDTypeTest
     @Test //CASSANDRA-15896
     public void testToJsonEmptyValue()
     {
-        String res = uuidType.toJSONString(uuidType.fromJSONObject("").bindAndGet(null), ProtocolVersion.CURRENT);
+        String res = uuidType.toJSONString(uuidType.fromJSONObject("").bindAndGet(null));
         assertEquals("\"\"", res);
     }
 

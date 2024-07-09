@@ -424,7 +424,7 @@ public class AbstractTypeTest
                 for (Object example : es.samples)
                 {
                     ByteBuffer bb = type.decompose(example);
-                    String json = type.toJSONString(bb, ProtocolVersion.CURRENT);
+                    String json = type.toJSONString(bb);
                     ColumnMetadata column = fake(type);
                     String cqlJson = "{\"" + column.name + "\": " + json + "}";
                     try

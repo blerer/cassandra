@@ -530,12 +530,12 @@ public abstract class Selector
      */
     public abstract ByteBuffer getOutput(ProtocolVersion protocolVersion) throws InvalidRequestException;
 
-    protected ColumnTimestamps getWritetimes(ProtocolVersion protocolVersion)
+    ColumnTimestamps getWritetimes(ProtocolVersion protocolVersion)
     {
         throw new UnsupportedOperationException();
     }
 
-    protected ColumnTimestamps getTTLs(ProtocolVersion protocolVersion)
+    ColumnTimestamps getTTLs(ProtocolVersion protocolVersion)
     {
         throw new UnsupportedOperationException();
     }

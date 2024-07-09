@@ -36,7 +36,6 @@ import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
-import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.JsonUtils;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -291,13 +290,13 @@ public final class VectorType<T> extends MultiElementType<List<T>>
     }
 
     @Override
-    public String toJSONString(ByteBuffer buffer, ProtocolVersion protocolVersion)
+    public String toJSONString(ByteBuffer buffer)
     {
-        return toJSONString(buffer, ByteBufferAccessor.instance, protocolVersion);
+        return toJSONString(buffer, ByteBufferAccessor.instance);
     }
 
     @Override
-    public <V> String toJSONString(V value, ValueAccessor<V> accessor, ProtocolVersion protocolVersion)
+    public <V> String toJSONString(V value, ValueAccessor<V> accessor)
     {
         StringBuilder sb = new StringBuilder();
         sb.append('[');
@@ -306,7 +305,7 @@ public final class VectorType<T> extends MultiElementType<List<T>>
         {
             if (i > 0)
                 sb.append(", ");
-            sb.append(elementType.toJSONString(split.get(i), accessor, protocolVersion));
+            sb.append(elementType.toJSONString(split.get(i), accessor));
         }
         sb.append(']');
         return sb.toString();

@@ -843,6 +843,24 @@ public class SelectOrderByTest extends CQLTester
                    row(3, 3, 0));
     }
 
+    @Test
+    public void testInOrderByWithMultipleColumnsBeingMerged()
+    {
+        createTable("CREATE TABLE %s (pk int, c int, v1 int, v2 int, PRIMARY KEY (pk, c))");
+
+        execute("INSERT INTO %s (pk, c, v1, v2) VALUES (0, 0, 3, 3);");
+        execute("INSERT INTO %s (pk, c, v1, v2) VALUES (0, 2, 1, 2);");
+        execute("INSERT INTO %s (pk, c, v1, v2) VALUES (2, 1, 5, 5);");
+        execute("INSERT INTO %s (pk, c, v1, v2) VALUES (2, 4, 9, 8);");
+
+        assertRows(execute("SELECT v1 + v2 FROM %s WHERE pk IN (0, 2) ORDER BY c ASC;"),
+                   row(6),
+                   row(10),
+                   row(3),
+                   row(17));
+    }
+
+
     private boolean isFirstIntSorted(Object[][] rows)
     {
         for (int i = 1; i < rows.length; i++)

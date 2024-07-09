@@ -34,7 +34,6 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.JsonUtils;
 
 public abstract class Selection
@@ -303,7 +302,6 @@ public abstract class Selection
     }
 
     private static List<ByteBuffer> rowToJson(List<ByteBuffer> row,
-                                              ProtocolVersion protocolVersion,
                                               ResultSet.ResultMetadata metadata,
                                               List<ColumnMetadata> orderingColumns)
     {
@@ -336,7 +334,7 @@ public abstract class Selection
             if (buffer == null)
                 sb.append("null");
             else
-                sb.append(spec.type.toJSONString(buffer, protocolVersion));
+                sb.append(spec.type.toJSONString(buffer));
         }
         sb.append("}");
 
@@ -476,7 +474,7 @@ public abstract class Selection
                 public List<ByteBuffer> getOutputRow()
                 {
                     if (isJson)
-                        return rowToJson(current, options.getProtocolVersion(), metadata, orderingColumns);
+                        return rowToJson(current, metadata, orderingColumns);
                     return current;
                 }
 
@@ -604,7 +602,7 @@ public abstract class Selection
                     for (Selector selector: selectors)
                         outputRow.add(selector.getOutput(options.getProtocolVersion()));
 
-                    return isJson ? rowToJson(outputRow, options.getProtocolVersion(), metadata, orderingColumns) : outputRow;
+                    return isJson ? rowToJson(outputRow, metadata, orderingColumns) : outputRow;
                 }
 
                 public void addInputRow(InputRow input)

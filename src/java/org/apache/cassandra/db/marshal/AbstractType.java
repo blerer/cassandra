@@ -180,17 +180,16 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
      * </p>
      *
      * @param buffer the value to convert
-     * @param protocolVersion the protocol version to use for the conversion
      * @return a JSON string representing the specified value
      */
-    public String toJSONString(ByteBuffer buffer, ProtocolVersion protocolVersion)
+    public String toJSONString(ByteBuffer buffer)
     {
         return '"' + Objects.toString(getSerializer().deserialize(buffer), "") + '"';
     }
 
-    public <V> String toJSONString(V value, ValueAccessor<V> accessor, ProtocolVersion protocolVersion)
+    public <V> String toJSONString(V value, ValueAccessor<V> accessor)
     {
-        return toJSONString(accessor.toBuffer(value), protocolVersion); // FIXME
+        return toJSONString(accessor.toBuffer(value)); // FIXME
     }
 
     /* validate that the byte array is a valid sequence for the type we are supposed to be comparing */

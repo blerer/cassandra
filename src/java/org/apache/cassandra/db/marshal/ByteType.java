@@ -94,7 +94,7 @@ public class ByteType extends NumberType<Byte>
     }
 
     @Override
-    public String toJSONString(ByteBuffer buffer, ProtocolVersion protocolVersion)
+    public String toJSONString(ByteBuffer buffer)
     {
         return getSerializer().deserialize(buffer).toString();
     }

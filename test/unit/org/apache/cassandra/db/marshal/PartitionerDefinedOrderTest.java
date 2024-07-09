@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.db.marshal;
 
-import org.apache.cassandra.transport.ProtocolVersion;
 import org.assertj.core.api.Assertions;
 import org.junit.Test;
 
@@ -37,7 +36,7 @@ public class PartitionerDefinedOrderTest
             if (partitioner.partitionOrdering(null) instanceof PartitionerDefinedOrder)
             {
                 PartitionerDefinedOrder partitionerDefinedOrder = (PartitionerDefinedOrder) partitioner.partitionOrdering(null);
-                String jsonString = partitionerDefinedOrder.withPartitionKeyType(type).toJSONString(UTF8Type.instance.decompose(key), ProtocolVersion.V4);
+                String jsonString = partitionerDefinedOrder.withPartitionKeyType(type).toJSONString(UTF8Type.instance.decompose(key));
                 assertTrue(jsonString.contains(key));
             }
         });
@@ -51,7 +50,7 @@ public class PartitionerDefinedOrderTest
             {
                 PartitionerDefinedOrder partitionerDefinedOrder = (PartitionerDefinedOrder) partitioner.partitionOrdering(null);
                 assertNull(partitionerDefinedOrder.getPartitionKeyType());
-                Assertions.assertThatThrownBy(() -> partitionerDefinedOrder.toJSONString(UTF8Type.instance.decompose(key), ProtocolVersion.V4))
+                Assertions.assertThatThrownBy(() -> partitionerDefinedOrder.toJSONString(UTF8Type.instance.decompose(key)))
                           .hasMessageContaining("PartitionerDefinedOrder's toJSONString method needs a partition key type but now is null.");
             }
         });

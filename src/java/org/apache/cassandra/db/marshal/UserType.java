@@ -264,7 +264,7 @@ public class UserType extends TupleType implements SchemaElement
     }
 
     @Override
-    public String toJSONString(ByteBuffer buffer, ProtocolVersion protocolVersion)
+    public String toJSONString(ByteBuffer buffer)
     {
         List<ByteBuffer> buffers = unpack(buffer);
         StringBuilder sb = new StringBuilder("{");
@@ -285,7 +285,7 @@ public class UserType extends TupleType implements SchemaElement
             if (valueBuffer == null)
                 sb.append("null");
             else
-                sb.append(types.get(i).toJSONString(valueBuffer, protocolVersion));
+                sb.append(types.get(i).toJSONString(valueBuffer));
         }
         return sb.append("}").toString();
     }

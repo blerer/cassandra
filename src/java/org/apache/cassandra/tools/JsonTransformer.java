@@ -59,7 +59,6 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
@@ -375,7 +374,7 @@ public final class JsonTransformer
                 else
                 {
                     AbstractType<?> type = column.cellValueType();
-                    json.writeRawValue(type.toJSONString(clustering.get(i), clustering.accessor(), ProtocolVersion.CURRENT));
+                    json.writeRawValue(type.toJSONString(clustering.get(i), clustering.accessor()));
                 }
             }
             json.writeEndArray();
@@ -491,7 +490,7 @@ public final class JsonTransformer
             else
             {
                 json.writeFieldName("value");
-                json.writeRawValue(cellType.toJSONString(cell.value(), cell.accessor(), ProtocolVersion.CURRENT));
+                json.writeRawValue(cellType.toJSONString(cell.value(), cell.accessor()));
             }
             if (liveInfo.isEmpty() || cell.timestamp() != liveInfo.timestamp())
             {
