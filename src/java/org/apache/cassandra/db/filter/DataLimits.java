@@ -107,7 +107,6 @@ public abstract class DataLimits
      * @param perPartitionLimit the row limit per partitions
      * @param pageSize the page size
      * @param isDistinct {@code true} if the query is a DISTINCT query, {@code false} otherwise.
-     * @param isPostSorted {@code true} if the LIMIT should be ignored, {@code false} otherwise.
      * @param aggregationSpec the aggregation being performed by the query
      * @return the {@link DataLimits} corresponding to those {@code Limits}.
      */

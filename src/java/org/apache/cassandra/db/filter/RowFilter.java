@@ -61,12 +61,12 @@ import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -145,7 +145,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
 
     /**
      * @return true if this filter belongs to a read that requires reconciliation at the coordinator
-     * @see StatementRestrictions#getRowFilter(IndexRegistry, QueryOptions)
+     * @see StatementRestrictions#getRowFilter(QueryOptions options, ClientState state)
      */
     public boolean needsReconciliation()
     {

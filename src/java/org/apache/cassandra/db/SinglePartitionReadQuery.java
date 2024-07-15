@@ -17,7 +17,9 @@
  */
 package org.apache.cassandra.db;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -26,6 +28,7 @@ import com.google.common.collect.Iterables;
 
 import org.apache.commons.lang3.tuple.Pair;
 
+import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -39,24 +42,13 @@ import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.service.pager.SinglePartitionPager;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
  * A {@code ReadQuery} for a single partition.
  */
 public interface SinglePartitionReadQuery extends ReadQuery
 {
-    public static Group<? extends SinglePartitionReadQuery> createGroup(TableMetadata metadata,
-                                                                        long nowInSec,
-                                                                        ColumnFilter columnFilter,
-                                                                        RowFilter rowFilter,
-                                                                        DataLimits limits,
-                                                                        List<DecoratedKey> partitionKeys,
-                                                                        ClusteringIndexFilter clusteringIndexFilter)
-    {
-        return SinglePartitionReadCommand.Group.create(metadata, nowInSec, columnFilter, rowFilter, limits, partitionKeys, clusteringIndexFilter);
-    }
-
-
     /**
      * Creates a new read query on a single partition.
      *
@@ -68,11 +60,11 @@ public interface SinglePartitionReadQuery extends ReadQuery
      *
      * @return a newly created read query. The returned query will use no row filter and have no limits.
      */
-    public static SinglePartitionReadQuery create(TableMetadata metadata,
-                                                  long nowInSec,
-                                                  DecoratedKey key,
-                                                  ColumnFilter columnFilter,
-                                                  ClusteringIndexFilter filter)
+    static SinglePartitionReadQuery create(TableMetadata metadata,
+                                           long nowInSec,
+                                           DecoratedKey key,
+                                           ColumnFilter columnFilter,
+                                           ClusteringIndexFilter filter)
     {
         return create(metadata, nowInSec, columnFilter, RowFilter.none(), DataLimits.NONE, key, filter);
     }
@@ -90,13 +82,13 @@ public interface SinglePartitionReadQuery extends ReadQuery
      *
      * @return a newly created read query.
      */
-    public static SinglePartitionReadQuery create(TableMetadata metadata,
-                                                  long nowInSec,
-                                                  ColumnFilter columnFilter,
-                                                  RowFilter rowFilter,
-                                                  DataLimits limits,
-                                                  DecoratedKey partitionKey,
-                                                  ClusteringIndexFilter clusteringIndexFilter)
+    static SinglePartitionReadQuery create(TableMetadata metadata,
+                                           long nowInSec,
+                                           ColumnFilter columnFilter,
+                                           RowFilter rowFilter,
+                                           DataLimits limits,
+                                           DecoratedKey partitionKey,
+                                           ClusteringIndexFilter clusteringIndexFilter)
     {
         return SinglePartitionReadCommand.create(metadata, nowInSec, columnFilter, rowFilter, limits, partitionKey, clusteringIndexFilter);
     }
@@ -163,6 +155,11 @@ public interface SinglePartitionReadQuery extends ReadQuery
         private final DataLimits limits;
         private final long nowInSec;
         private final boolean selectsFullPartitions;
+
+        public static ReadQuery.Builder newBuilder(TableMetadata table, Collection<ByteBuffer> keys, long nowInSec)
+        {
+            return new Builder(table, keys, nowInSec);
+        }
 
         public Group(List<T> queries, DataLimits limits)
         {
@@ -288,5 +285,44 @@ public interface SinglePartitionReadQuery extends ReadQuery
         {
             return queries.toString();
         }
+
+        public static final class Builder extends ReadQuery.Builder
+        {
+            private final Collection<ByteBuffer> keys;
+
+            public Builder(TableMetadata table, Collection<ByteBuffer> keys, long nowInSec)
+            {
+                super(table, nowInSec);
+                this.keys = keys;
+            }
+
+            @Override
+            public ReadQuery build()
+            {
+                if (keys.isEmpty())
+                    return ReadQuery.empty(table);
+
+                if (clusteringIndexFilter == null || clusteringIndexFilter.isEmpty(table.comparator))
+                    return ReadQuery.empty(table);
+
+                List<SinglePartitionReadCommand> commands = new ArrayList<>(keys.size());
+                for (ByteBuffer key : keys)
+                {
+                    QueryProcessor.validateKey(key);
+                    DecoratedKey partitionKey = table.partitioner.decorateKey(ByteBufferUtil.clone(key));
+                    commands.add(SinglePartitionReadCommand.create(table,
+                                                                   nowInSec,
+                                                                   columnFilter,
+                                                                   rowFilter,
+                                                                   limits,
+                                                                   partitionKey,
+                                                                   clusteringIndexFilter));
+                }
+
+
+                return SinglePartitionReadCommand.Group.create(commands, limits);
+            }
+        }
+
     }
 }

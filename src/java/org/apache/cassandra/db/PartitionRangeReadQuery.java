@@ -17,9 +17,8 @@
  */
 package org.apache.cassandra.db;
 
-import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
-import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.service.pager.PartitionRangeQueryPager;
@@ -31,14 +30,11 @@ import org.apache.cassandra.transport.ProtocolVersion;
  */
 public interface PartitionRangeReadQuery extends ReadQuery
 {
-    static ReadQuery create(TableMetadata table,
-                            long nowInSec,
-                            ColumnFilter columnFilter,
-                            RowFilter rowFilter,
-                            DataLimits limits,
-                            DataRange dataRange)
+    static ReadQuery.Builder newBuilder(TableMetadata table,
+                                        AbstractBounds<PartitionPosition> keyBounds,
+                                        long nowInSec)
     {
-        return PartitionRangeReadCommand.create(table, nowInSec, columnFilter, rowFilter, limits, dataRange);
+        return new Builder(table, keyBounds, nowInSec);
     }
 
     DataRange dataRange();
@@ -89,4 +85,28 @@ public interface PartitionRangeReadQuery extends ReadQuery
 
         return dataRange().selectsAllPartition() && !rowFilter().hasExpressionOnClusteringOrRegularColumns();
     }
+
+    class Builder extends ReadQuery.Builder
+    {
+        private final AbstractBounds<PartitionPosition> keyBounds;
+
+        public Builder(TableMetadata table, AbstractBounds<PartitionPosition> keyBounds, long nowInSec)
+        {
+            super(table, nowInSec);
+            this.keyBounds = keyBounds;
+        }
+        @Override
+        public ReadQuery build()
+        {
+            if (keyBounds == null || clusteringIndexFilter == null)
+                return ReadQuery.empty(table);
+
+            DataRange dataRange = new DataRange(keyBounds, clusteringIndexFilter);
+            ReadQuery command = PartitionRangeReadCommand.create(table, nowInSec, columnFilter, rowFilter, limits, dataRange);
+            // If there's a secondary index that the command can use, have it validate the request parameters.
+            command.maybeValidateIndex();
+
+            return command;
+        }
+    };
 }

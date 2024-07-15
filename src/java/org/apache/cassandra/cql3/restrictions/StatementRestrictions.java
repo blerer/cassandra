@@ -29,6 +29,10 @@ import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.statements.StatementType;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.filter.ClusteringIndexFilter;
+import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
+import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
+import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -41,6 +45,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.utils.btree.BTreeSet;
@@ -735,7 +740,7 @@ public final class StatementRestrictions
         filterRestrictions.add(expression);
     }
 
-    public RowFilter getRowFilter(IndexRegistry indexRegistry, QueryOptions options)
+    public RowFilter getRowFilter(QueryOptions options, ClientState state) throws InvalidRequestException
     {
         if (filterRestrictions.isEmpty())
             return RowFilter.none();
@@ -746,11 +751,15 @@ public final class StatementRestrictions
                                       && Keyspace.open(table.keyspace).getReplicationStrategy().getReplicationFactor().allReplicas > 1;
 
         RowFilter filter = RowFilter.create(needsReconciliation);
+        IndexRegistry indexRegistry = IndexRegistry.obtain(table);
         for (Restrictions restrictions : filterRestrictions.getRestrictions())
             restrictions.addToRowFilter(filter, indexRegistry, options);
 
         for (CustomIndexExpression expression : filterRestrictions.getCustomIndexExpressions())
             expression.addToRowFilter(filter, table, options);
+
+        if (filter.needsReconciliation() && filter.isMutableIntersection() && needFiltering(table))
+            Guardrails.intersectFilteringQueryEnabled.ensureEnabled(state);
 
         return filter;
     }
@@ -837,6 +846,62 @@ public final class StatementRestrictions
         // it is a range query if it has at least one the column alias for which no relation is defined or is not EQ or IN.
         return clusteringColumnsRestrictions.size() < numberOfClusteringColumns
             || !clusteringColumnsRestrictions.hasOnlyEqualityRestrictions();
+    }
+
+    public ReadQuery.Builder readQueryBuilder(QueryOptions options, ClientState state, long nowInSec)
+    {
+        boolean isPartitionRangeQuery = isKeyRange() || usesSecondaryIndexing();
+
+        if (isPartitionRangeQuery)
+        {
+            if (isKeyRange() && usesSecondaryIndexing() && !SchemaConstants.isLocalSystemKeyspace(table.keyspace))
+                Guardrails.nonPartitionRestrictedIndexQueryEnabled.ensureEnabled(state);
+
+            return PartitionRangeReadQuery.newBuilder(table, getPartitionKeyBounds(options), nowInSec);
+        }
+
+        Collection<ByteBuffer> keys = getPartitionKeys(options, state);
+        if (!keys.isEmpty() && keyIsInRelation())
+            Guardrails.partitionKeysInSelect.guard(keys.size(), table.name, false, state);
+
+        return SinglePartitionReadQuery.Group.newBuilder(table, keys, nowInSec);
+    }
+
+    public ClusteringIndexFilter makeClusteringIndexFilter(QueryOptions options,
+                                                           ClientState state,
+                                                           ColumnFilter columnFilter,
+                                                           boolean isDistinct,
+                                                           boolean isReversed)
+    {
+        if (isDistinct)
+        {
+            // We need to be able to distinguish between partition having live rows and those that don't. But
+            // doing so is not trivial since "having a live row" depends potentially on
+            //   1) when the query is performed, due to TTLs
+            //   2) how thing reconcile together between different nodes
+            // so that it's hard to really optimize properly internally. So to keep it simple, we simply query
+            // for the first row of the partition and hence uses Slices.ALL. We'll limit it to the first live
+            // row however in getLimit().
+            return new ClusteringIndexSliceFilter(Slices.ALL, false);
+        }
+
+        if (isColumnRange())
+        {
+            Slices slices = getSlices(options);
+            if (slices == Slices.NONE && columnFilter.fetchedColumns().statics.isEmpty())
+                return null;
+
+            return new ClusteringIndexSliceFilter(slices, isReversed);
+        }
+
+        NavigableSet<Clustering<?>> clusterings = getClusteringColumns(options, state);;
+        // We can have no clusterings if either we're only selecting the static columns, or if we have
+        // a 'IN ()' for clusterings. In that case, we still want to query if some static columns are
+        // queried. But we're fine otherwise.
+        if (clusterings.isEmpty() && columnFilter.fetchedColumns().statics.isEmpty())
+            return null;
+
+        return new ClusteringIndexNamesFilter(clusterings, isReversed);
     }
 
     /**
