@@ -31,7 +31,6 @@ import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.db.rows.Cell;
-import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
@@ -79,10 +78,9 @@ abstract class ColumnTimestamps
     /**
      * Converts the timestamps into their serialized form.
      *
-     * @param protocolVersion the protocol version to use for the serialization
      * @return the serialized timestamps
      */
-    public abstract ByteBuffer toByteBuffer(ProtocolVersion protocolVersion);
+    public abstract ByteBuffer toByteBuffer();
 
     /**
      * Appends an empty timestamp at the end of this list.
@@ -212,7 +210,7 @@ abstract class ColumnTimestamps
         }
 
         @Override
-        public ByteBuffer toByteBuffer(ProtocolVersion protocolVersion)
+        public ByteBuffer toByteBuffer()
         {
             return null;
         }
@@ -287,7 +285,7 @@ abstract class ColumnTimestamps
         }
 
         @Override
-        public ByteBuffer toByteBuffer(ProtocolVersion protocolVersion)
+        public ByteBuffer toByteBuffer()
         {
             return timestamp == type.defaultValue() ? null : type.toByteBuffer(timestamp);
         }
@@ -376,7 +374,7 @@ abstract class ColumnTimestamps
         }
 
         @Override
-        public ByteBuffer toByteBuffer(ProtocolVersion protocolVersion)
+        public ByteBuffer toByteBuffer()
         {
             if (timestamps.isEmpty())
                 return null;

@@ -36,7 +36,6 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
@@ -237,9 +236,10 @@ abstract class ElementsSelector extends Selector
         };
     }
 
-    public ByteBuffer getOutput(ProtocolVersion protocolVersion)
+    @Override
+    public ByteBuffer getOutput()
     {
-        ByteBuffer value = selected.getOutput(protocolVersion);
+        ByteBuffer value = selected.getOutput();
         return value == null ? null : extractSelection(value);
     }
 
@@ -305,28 +305,27 @@ abstract class ElementsSelector extends Selector
             return type.getSerializer().getSerializedValue(collection, key, keyType(type));
         }
 
-        protected int getElementIndex(ProtocolVersion protocolVersion, ByteBuffer key)
+        protected int getElementIndex(ByteBuffer key)
         {
-            ByteBuffer output = selected.getOutput(protocolVersion);
+            ByteBuffer output = selected.getOutput();
             return output == null ? -1 : type.getSerializer().getIndexFromSerialized(output, key, keyType(type));
         }
 
         @Override
-        protected ColumnTimestamps getWritetimes(ProtocolVersion protocolVersion)
+        protected ColumnTimestamps getWritetimes()
         {
-            return getElementTimestamps(protocolVersion, selected.getWritetimes(protocolVersion));
+            return getElementTimestamps(selected.getWritetimes());
         }
 
         @Override
-        protected ColumnTimestamps getTTLs(ProtocolVersion protocolVersion)
+        protected ColumnTimestamps getTTLs()
         {
-            return getElementTimestamps(protocolVersion, selected.getTTLs(protocolVersion));
+            return getElementTimestamps(selected.getTTLs());
         }
 
-        private ColumnTimestamps getElementTimestamps(ProtocolVersion protocolVersion,
-                                                      ColumnTimestamps timestamps)
+        private ColumnTimestamps getElementTimestamps(ColumnTimestamps timestamps)
         {
-            int index = getElementIndex(protocolVersion, key);
+            int index = getElementIndex(key);
             return index == -1 ? ColumnTimestamps.NO_TIMESTAMP : timestamps.get(index);
         }
 
@@ -425,20 +424,20 @@ abstract class ElementsSelector extends Selector
         }
 
         @Override
-        protected ColumnTimestamps getWritetimes(ProtocolVersion protocolVersion)
+        protected ColumnTimestamps getWritetimes()
         {
-            return getTimestampsSlice(protocolVersion, selected.getWritetimes(protocolVersion));
+            return getTimestampsSlice(selected.getWritetimes());
         }
 
         @Override
-        protected ColumnTimestamps getTTLs(ProtocolVersion protocolVersion)
+        protected ColumnTimestamps getTTLs()
         {
-            return getTimestampsSlice(protocolVersion, selected.getTTLs(protocolVersion));
+            return getTimestampsSlice(selected.getTTLs());
         }
 
-        protected ColumnTimestamps getTimestampsSlice(ProtocolVersion protocolVersion, ColumnTimestamps timestamps)
+        protected ColumnTimestamps getTimestampsSlice(ColumnTimestamps timestamps)
         {
-            ByteBuffer output = selected.getOutput(protocolVersion);
+            ByteBuffer output = selected.getOutput();
             return (output == null || isCollectionEmpty(output))
                    ? ColumnTimestamps.NO_TIMESTAMP
                    : timestamps.slice(getIndexRange(output, from, to) );

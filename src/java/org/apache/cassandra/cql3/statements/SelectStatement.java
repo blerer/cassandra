@@ -111,7 +111,6 @@ import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.transport.Dispatcher;
-import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
@@ -613,18 +612,10 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     {
         QueryOptions options = QueryOptions.DEFAULT;
         int userLimit = limits.limit(options);
-        int perPartitionLimit = limits.perPartitionLimit(options);
 
         options = increasePageSizeIfneeded(options, userLimit);
 
         AggregationSpecification aggregationSpec = getAggregationSpec(options);
-
-        // If we do post ordering we need to get all the results sorted before we can trim them.
-        DataLimits dataLimits = DataLimits.limitsFor(ignoreLimitForPostOrdering() ? DataLimits.NO_LIMIT : userLimit,
-                                                     perPartitionLimit,
-                                                     options.getPageSize(),
-                                                     parameters.isDistinct,
-                                                     aggregationSpec);
 
         Selectors selectors = selection.newSelectors(options);
         return process(partitions, options, selectors, nowInSec, userLimit, aggregationSpec, unmask, state);
@@ -751,19 +742,14 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         return cqlRows;
     }
 
-    public static ByteBuffer[] getComponents(TableMetadata metadata, DecoratedKey dk)
+    public static ByteBuffer[] keyComponents(TableMetadata table, DecoratedKey dk)
     {
         ByteBuffer key = dk.getKey();
-        if (metadata.partitionKeyColumns().size() == 1)
-            return new ByteBuffer[]{ key };
-        if (metadata.partitionKeyType instanceof CompositeType)
-        {
-            return ((CompositeType)metadata.partitionKeyType).split(key);
-        }
-        else
-        {
-            return new ByteBuffer[]{ key };
-        }
+
+        if (table.partitionKeyType instanceof CompositeType)
+            return ((CompositeType) table.partitionKeyType).split(key);
+
+        return new ByteBuffer[]{ key };
     }
 
     private void maybeWarn(ResultSetBuilder result, QueryOptions options)
@@ -772,7 +758,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             return;
         ColumnFamilyStore store = cfs();
         if (store != null)
-            store.metric.coordinatorReadSize.update(result.getSize());
+            store.metric.coordinatorReadSize.update(result.sizeInBytes());
         if (result.shouldWarn(options.getCoordinatorReadSizeWarnThresholdBytes()))
         {
             String msg = String.format("Read on table %s has exceeded the size warning threshold of %,d bytes", table, options.getCoordinatorReadSizeWarnThresholdBytes());
@@ -799,7 +785,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             if (store != null)
             {
                 store.metric.coordinatorReadSizeAborts.mark();
-                store.metric.coordinatorReadSize.update(result.getSize());
+                store.metric.coordinatorReadSize.update(result.sizeInBytes());
             }
             // read errors require blockFor and recieved (its in the protocol message), but this isn't known;
             // to work around this, treat the coordinator as the only response we care about and mark it failed
@@ -820,9 +806,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     throws InvalidRequestException
     {
         maybeFail(result, options);
-        ProtocolVersion protocolVersion = options.getProtocolVersion();
 
-        ByteBuffer[] keyComponents = getComponents(table, partition.partitionKey());
+        ByteBuffer[] keyComponents = keyComponents(table, partition.partitionKey());
 
         Row staticRow = partition.staticRow();
         // If there is no rows, we include the static content if we should and we're done.
@@ -830,56 +815,21 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         {
             if (!staticRow.isEmpty() && restrictions.returnStaticContentOnPartitionWithNoRows())
             {
-                result.newRow(protocolVersion, partition.partitionKey(), staticRow.clustering(), selection.getColumns());
-                maybeFail(result, options);
-                for (ColumnMetadata def : selection.getColumns())
-                {
-                    switch (def.kind)
-                    {
-                        case PARTITION_KEY:
-                            result.add(keyComponents[def.position()]);
-                            break;
-                        case STATIC:
-                            result.add(partition.staticRow().getColumnData(def), nowInSec);
-                            break;
-                        default:
-                            result.add((ByteBuffer)null);
-                    }
-                }
+                result.addStaticRow(partition.partitionKey(), keyComponents, staticRow, nowInSec);
             }
+            maybeFail(result, options);
             return;
         }
 
         while (partition.hasNext())
         {
-            Row row = partition.next();
-            result.newRow(protocolVersion, partition.partitionKey(), row.clustering(), selection.getColumns());
+            result.addRow(partition.partitionKey(), keyComponents, staticRow, partition.next(), nowInSec);
 
             // reads aren't failed as soon the size exceeds the failure threshold, they're failed once the failure
             // threshold has been exceeded and we start adding more data. We're slightly more permissive to avoid
             // cases where a row can never be read. Since we only warn/fail after entire rows are read, this will
             // still allow the entire dataset to be read with LIMIT 1 queries, even if every row is oversized
             maybeFail(result, options);
-
-            // Respect selection order
-            for (ColumnMetadata def : selection.getColumns())
-            {
-                switch (def.kind)
-                {
-                    case PARTITION_KEY:
-                        result.add(keyComponents[def.position()]);
-                        break;
-                    case CLUSTERING:
-                        result.add(row.clustering().bufferAt(def.position()));
-                        break;
-                    case REGULAR:
-                        result.add(row.getColumnData(def), nowInSec);
-                        break;
-                    case STATIC:
-                        result.add(staticRow.getColumnData(def), nowInSec);
-                        break;
-                }
-            }
         }
     }
 

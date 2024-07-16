@@ -41,7 +41,6 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
@@ -188,14 +187,14 @@ final class UserTypeSelector extends Selector
             field.addInput(input);
     }
 
-    public ByteBuffer getOutput(ProtocolVersion protocolVersion)
+    public ByteBuffer getOutput()
     {
-        UserType userType = (UserType) type;
+        UserType userType = type;
         List<ByteBuffer> buffers = new ArrayList<>(userType.size());
         for (int i = 0, m = userType.size(); i < m; i++)
         {
             Selector selector = fields.get(userType.fieldName(i));
-            buffers.add(selector == null ? null : selector.getOutput(protocolVersion));
+            buffers.add(selector == null ? null : selector.getOutput());
         }
         return type.pack(buffers);
     }

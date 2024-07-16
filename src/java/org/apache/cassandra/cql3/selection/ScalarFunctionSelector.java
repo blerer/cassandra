@@ -37,6 +37,7 @@ final class ScalarFunctionSelector extends AbstractFunctionSelector<ScalarFuncti
         }
     };
 
+    @Override
     public void addInput(InputRow input)
     {
         for (int i = 0, m = argSelectors.size(); i < m; i++)
@@ -46,16 +47,18 @@ final class ScalarFunctionSelector extends AbstractFunctionSelector<ScalarFuncti
         }
     }
 
+    @Override
     public void reset()
     {
     }
 
-    public ByteBuffer getOutput(ProtocolVersion protocolVersion)
+    @Override
+    public ByteBuffer getOutput()
     {
         for (int i = 0, m = argSelectors.size(); i < m; i++)
         {
             Selector s = argSelectors.get(i);
-            setArg(i, s.getOutput(protocolVersion));
+            setArg(i, s.getOutput());
             s.reset();
         }
         return fun.execute(args());

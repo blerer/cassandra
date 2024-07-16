@@ -25,7 +25,6 @@ import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.transport.ProtocolVersion;
 
 /**
  * A <code>GroupMaker</code> can be used to determine if some sorted rows belongs to the same group or not.
@@ -172,7 +171,7 @@ public abstract class GroupMaker
         {
             super(comparator, clusteringPrefixSize, state);
             this.selector = selector;
-            this.input = new Selector.InputRow(ProtocolVersion.CURRENT, columns, false);
+            this.input = new Selector.InputRow(columns, false);
             this.lastOutput = lastClustering == null ? null :
                                                        executeSelector(lastClustering.bufferAt(clusteringPrefixSize - 1));
         }
@@ -184,7 +183,7 @@ public abstract class GroupMaker
         {
             super(comparator, clusteringPrefixSize);
             this.selector = selector;
-            this.input = new Selector.InputRow(ProtocolVersion.CURRENT, columns, false);
+            this.input = new Selector.InputRow(columns, false);
         }
 
         @Override
@@ -226,7 +225,7 @@ public abstract class GroupMaker
 
             // For computing groups we do not need to use the client protocol version.
             selector.addInput(input);
-            ByteBuffer output = selector.getOutput(ProtocolVersion.CURRENT);
+            ByteBuffer output = selector.getOutput();
             selector.reset();
             input.reset(false);
 

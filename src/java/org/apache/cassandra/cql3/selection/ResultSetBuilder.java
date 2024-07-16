@@ -27,10 +27,8 @@ import org.apache.cassandra.cql3.selection.Selection.Selectors;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.aggregation.GroupMaker;
-import org.apache.cassandra.db.rows.Cell;
-import org.apache.cassandra.db.rows.ColumnData;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.transport.ProtocolVersion;
 
 public final class ResultSetBuilder
 {
@@ -57,7 +55,7 @@ public final class ResultSetBuilder
      */
     private Selector.InputRow inputRow;
 
-    private long size = 0;
+    private long sizeInBytes;
     private boolean sizeWarningEmitted = false;
 
     public ResultSetBuilder(ResultMetadata metadata, Selectors selectors, boolean unmask)
@@ -75,16 +73,16 @@ public final class ResultSetBuilder
 
     private void addSize(List<ByteBuffer> row)
     {
-        for (int i=0, isize=row.size(); i<isize; i++)
+        for (int i = 0, m = row.size(); i < m; i++)
         {
             ByteBuffer value = row.get(i);
-            size += value != null ? value.remaining() : 0;
+            sizeInBytes += value != null ? value.remaining() : 0;
         }
     }
 
     public boolean shouldWarn(long thresholdBytes)
     {
-        if (thresholdBytes != -1 &&!sizeWarningEmitted && size > thresholdBytes)
+        if (thresholdBytes != -1 && !sizeWarningEmitted && sizeInBytes > thresholdBytes)
         {
             sizeWarningEmitted = true;
             return true;
@@ -94,27 +92,58 @@ public final class ResultSetBuilder
 
     public boolean shouldReject(long thresholdBytes)
     {
-        return thresholdBytes != -1 && size > thresholdBytes;
+        return thresholdBytes != -1 && sizeInBytes > thresholdBytes;
     }
 
-    public long getSize()
+    public long sizeInBytes()
     {
-        return size;
+        return sizeInBytes;
     }
 
-    public void add(ByteBuffer v)
+
+    public void addStaticRow(DecoratedKey partitionKey, ByteBuffer[] pratitionKeyComponents, Row staticRow, long nowInSec)
     {
-        inputRow.add(v);
+        newRow(partitionKey, staticRow.clustering(), selectors.columns());
+
+        for (ColumnMetadata def : selectors.columns())
+        {
+            switch (def.kind)
+            {
+                case PARTITION_KEY:
+                    inputRow.add(pratitionKeyComponents[def.position()]);
+                    break;
+                case STATIC:
+                    inputRow.add(staticRow.getColumnData(def), nowInSec);
+                    break;
+                default:
+                    inputRow.add(null);
+            }
+        }
     }
 
-    public void add(Cell<?> c, long nowInSec)
+    public void addRow(DecoratedKey partitionKey, ByteBuffer[] pratitionKeyComponents, Row staticRow, Row row, long nowInSec)
     {
-        inputRow.add(c, nowInSec);
-    }
+        newRow(partitionKey, row.clustering(), selectors.columns());
 
-    public void add(ColumnData columnData, long nowInSec)
-    {
-        inputRow.add(columnData, nowInSec);
+        // Respect selection order
+        for (ColumnMetadata def : selectors.columns())
+        {
+            switch (def.kind)
+            {
+                case PARTITION_KEY:
+                    inputRow.add(pratitionKeyComponents[def.position()]);
+                    break;
+                case CLUSTERING:
+                    inputRow.add(row.clustering().bufferAt(def.position()));
+                    break;
+                case REGULAR:
+                    inputRow.add(row.getColumnData(def), nowInSec);
+                    break;
+                case STATIC:
+                    inputRow.add(staticRow.getColumnData(def), nowInSec);
+                    break;
+            }
+        }
     }
 
     /**
@@ -123,7 +152,7 @@ public final class ResultSetBuilder
      * @param partitionKey the partition key of the new row
      * @param clustering the clustering of the new row
      */
-    public void newRow(ProtocolVersion protocolVersion, DecoratedKey partitionKey, Clustering<?> clustering, List<ColumnMetadata> columns)
+    public void newRow(DecoratedKey partitionKey, Clustering<?> clustering, List<ColumnMetadata> columns)
     {
         // The groupMaker needs to be called for each row
         boolean isNewAggregate = groupMaker == null || groupMaker.isNewGroup(partitionKey, clustering);
@@ -143,8 +172,7 @@ public final class ResultSetBuilder
         }
         else
         {
-            inputRow = new Selector.InputRow(protocolVersion,
-                                             columns,
+            inputRow = new Selector.InputRow(columns,
                                              unmask,
                                              selectors.collectWritetimes(),
                                              selectors.collectTTLs());

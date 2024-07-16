@@ -31,7 +31,6 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
@@ -105,7 +104,8 @@ public class TermSelector extends Selector
     {
     }
 
-    public ByteBuffer getOutput(ProtocolVersion protocolVersion)
+    @Override
+    public ByteBuffer getOutput()
     {
         return value;
     }

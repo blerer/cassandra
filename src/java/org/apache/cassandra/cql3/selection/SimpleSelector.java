@@ -159,19 +159,19 @@ public final class SimpleSelector extends Selector
     }
 
     @Override
-    public ByteBuffer getOutput(ProtocolVersion protocolVersion)
+    public ByteBuffer getOutput()
     {
         return current;
     }
 
     @Override
-    protected ColumnTimestamps getWritetimes(ProtocolVersion protocolVersion)
+    protected ColumnTimestamps getWritetimes()
     {
         return writetimes;
     }
 
     @Override
-    protected ColumnTimestamps getTTLs(ProtocolVersion protocolVersion)
+    protected ColumnTimestamps getTTLs()
     {
         return ttls;
     }

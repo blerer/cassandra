@@ -342,55 +342,56 @@ public abstract class Selection
         return Arrays.asList(jsonRow);
     }
 
-    public static interface Selectors
+    public interface Selectors
     {
         /**
          * Returns the {@code ColumnFilter} corresponding to those selectors
          *
          * @return the {@code ColumnFilter} corresponding to those selectors
          */
-        public ColumnFilter getColumnFilter();
+        ColumnFilter getColumnFilter();
+
+        /**
+         * Returns the columns processed by this {@code Selectors}.
+         *
+         * @return the columns processed by this {@code Selectors}
+         */
+        List<ColumnMetadata> columns();
 
         /**
          * Checks if this Selectors perform some processing
          * @return {@code true} if this Selectors perform some processing, {@code false} otherwise.
          */
-        public boolean hasProcessing();
+        boolean hasProcessing();
 
         /**
          * Checks if one of the selectors perform some aggregations.
          * @return {@code true} if one of the selectors perform some aggregations, {@code false} otherwise.
          */
-        public boolean isAggregate();
-
-        /**
-         * Returns the number of fetched columns
-         * @return the number of fetched columns
-         */
-        public int numberOfFetchedColumns();
+        boolean isAggregate();
 
         /**
          * Checks if one of the selectors collect TTLs.
          * @return {@code true} if one of the selectors collect TTLs, {@code false} otherwise.
          */
-        public boolean collectTTLs();
+        boolean collectTTLs();
 
         /**
          * Checks if one of the selectors collects write timestamps.
          * @return {@code true} if one of the selectors collects write timestamps, {@code false} otherwise.
          */
-        public boolean collectWritetimes();
+        boolean collectWritetimes();
 
         /**
          * Adds the current row of the specified <code>ResultSetBuilder</code>.
          *
          * @param input the input row
          */
-        public void addInputRow(InputRow input);
+        void addInputRow(InputRow input);
 
-        public List<ByteBuffer> getOutputRow();
+        List<ByteBuffer> getOutputRow();
 
-        public void reset();
+        void reset();
     }
 
     // Special cased selection for when only columns are selected.
@@ -466,6 +467,12 @@ public abstract class Selection
             {
                 private List<ByteBuffer> current;
 
+                @Override
+                public List<ColumnMetadata> columns()
+                {
+                    return getColumns();
+                }
+
                 public void reset()
                 {
                     current = null;
@@ -491,12 +498,6 @@ public abstract class Selection
                 public boolean hasProcessing()
                 {
                     return false;
-                }
-
-                @Override
-                public int numberOfFetchedColumns()
-                {
-                    return getColumns().size();
                 }
 
                 @Override
@@ -579,6 +580,12 @@ public abstract class Selection
             {
                 private final List<Selector> selectors = factories.newInstances(options);
 
+                @Override
+                public List<ColumnMetadata> columns()
+                {
+                    return getColumns();
+                }
+
                 public void reset()
                 {
                     for (Selector selector : selectors)
@@ -600,7 +607,7 @@ public abstract class Selection
                     List<ByteBuffer> outputRow = new ArrayList<>(selectors.size());
 
                     for (Selector selector: selectors)
-                        outputRow.add(selector.getOutput(options.getProtocolVersion()));
+                        outputRow.add(selector.getOutput());
 
                     return isJson ? rowToJson(outputRow, metadata, orderingColumns) : outputRow;
                 }
@@ -609,12 +616,6 @@ public abstract class Selection
                 {
                     for (Selector selector : selectors)
                         selector.addInput(input);
-                }
-
-                @Override
-                public int numberOfFetchedColumns()
-                {
-                    return getColumns().size();
                 }
 
                 @Override

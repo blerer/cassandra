@@ -327,7 +327,7 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
         {
             Map<String, ByteBuffer> data = new HashMap<>();
 
-            ByteBuffer[] keyComponents = SelectStatement.getComponents(metadata, key);
+            ByteBuffer[] keyComponents = SelectStatement.keyComponents(metadata, key);
             for (ColumnMetadata def : metadata.partitionKeyColumns())
                 data.put(def.name.toString(), keyComponents[def.position()]);
 

@@ -193,7 +193,7 @@ abstract class AbstractFunctionSelector<T extends Function> extends Selector
                     if (selector.isTerminal())
                     {
                         ++terminalCount;
-                        ByteBuffer output = selector.getOutput(version);
+                        ByteBuffer output = selector.getOutput();
                         RequestValidations.checkBindValueSet(output, "Invalid unset value for argument in call to function %s", fun.name().name);
                         terminalArgs.add(output);
                     }

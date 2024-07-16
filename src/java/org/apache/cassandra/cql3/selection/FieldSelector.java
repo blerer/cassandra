@@ -33,7 +33,6 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.transport.ProtocolVersion;
 
 final class FieldSelector extends Selector
 {
@@ -104,9 +103,9 @@ final class FieldSelector extends Selector
         selected.addInput(input);
     }
 
-    public ByteBuffer getOutput(ProtocolVersion protocolVersion)
+    public ByteBuffer getOutput()
     {
-        ByteBuffer value = selected.getOutput(protocolVersion);
+        ByteBuffer value = selected.getOutput();
         if (value == null)
             return null;
         List<ByteBuffer> buffers = type.unpack(value);
@@ -114,19 +113,19 @@ final class FieldSelector extends Selector
     }
 
     @Override
-    protected ColumnTimestamps getWritetimes(ProtocolVersion protocolVersion)
+    protected ColumnTimestamps getWritetimes()
     {
-        return getOutput(protocolVersion) == null
+        return getOutput() == null
                ? ColumnTimestamps.NO_TIMESTAMP
-               : selected.getWritetimes(protocolVersion).get(field);
+               : selected.getWritetimes().get(field);
     }
 
     @Override
-    protected ColumnTimestamps getTTLs(ProtocolVersion protocolVersion)
+    protected ColumnTimestamps getTTLs()
     {
-        return getOutput(protocolVersion) == null
+        return getOutput() == null
                ? ColumnTimestamps.NO_TIMESTAMP
-               : selected.getTTLs(protocolVersion).get(field);
+               : selected.getTTLs().get(field);
     }
 
     public AbstractType<?> getType()

@@ -31,7 +31,6 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.transport.ProtocolVersion;
 
 final class WritetimeOrTTLSelector extends Selector
 {
@@ -130,23 +129,23 @@ final class WritetimeOrTTLSelector extends Selector
         isSet = true;
 
         selected.addInput(input);
-        ProtocolVersion protocolVersion = input.getProtocolVersion();
 
         switch (kind)
         {
             case WRITE_TIME:
-                current = selected.getWritetimes(protocolVersion).toByteBuffer(protocolVersion);
+                current = selected.getWritetimes().toByteBuffer();
                 break;
             case MAX_WRITE_TIME:
-                current = selected.getWritetimes(protocolVersion).max().toByteBuffer(protocolVersion);
+                current = selected.getWritetimes().max().toByteBuffer();
                 break;
             case TTL:
-                current = selected.getTTLs(protocolVersion).toByteBuffer(protocolVersion);
+                current = selected.getTTLs().toByteBuffer();
                 break;
         }
     }
 
-    public ByteBuffer getOutput(ProtocolVersion protocolVersion)
+    @Override
+    public ByteBuffer getOutput()
     {
         return current;
     }

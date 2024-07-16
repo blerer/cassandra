@@ -39,7 +39,6 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.Pair;
 
 /**
@@ -192,6 +191,7 @@ final class MapSelector extends Selector
         }
     }
 
+    @Override
     public void addInput(InputRow input)
     {
         for (int i = 0, m = elements.size(); i < m; i++)
@@ -202,13 +202,14 @@ final class MapSelector extends Selector
         }
     }
 
-    public ByteBuffer getOutput(ProtocolVersion protocolVersion)
+    @Override
+    public ByteBuffer getOutput()
     {
         Map<ByteBuffer, ByteBuffer> map = new TreeMap<>(type.getKeysType());
         for (int i = 0, m = elements.size(); i < m; i++)
         {
             Pair<Selector, Selector> pair = elements.get(i);
-            map.put(pair.left.getOutput(protocolVersion), pair.right.getOutput(protocolVersion));
+            map.put(pair.left.getOutput(), pair.right.getOutput());
         }
 
         List<ByteBuffer> buffers = new ArrayList<>(elements.size() * 2);
@@ -220,6 +221,7 @@ final class MapSelector extends Selector
         return type.pack(buffers);
     }
 
+    @Override
     public void reset()
     {
         for (int i = 0, m = elements.size(); i < m; i++)

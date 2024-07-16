@@ -44,7 +44,6 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
@@ -305,7 +304,6 @@ public abstract class Selector
      */
     public static final class InputRow
     {
-        private final ProtocolVersion protocolVersion;
         private final List<ColumnMetadata> columns;
         private final boolean unmask;
         private final boolean collectWritetimes;
@@ -316,18 +314,16 @@ public abstract class Selector
         private RowTimestamps ttls;
         private int index;
 
-        public InputRow(ProtocolVersion protocolVersion, List<ColumnMetadata> columns, boolean unmask)
+        public InputRow(List<ColumnMetadata> columns, boolean unmask)
         {
-            this(protocolVersion, columns, unmask, false, false);
+            this(columns, unmask, false, false);
         }
 
-        public InputRow(ProtocolVersion protocolVersion,
-                        List<ColumnMetadata> columns,
+        public InputRow(List<ColumnMetadata> columns,
                         boolean unmask,
                         boolean collectWritetimes,
                         boolean collectTTLs)
         {
-            this.protocolVersion = protocolVersion;
             this.columns = columns;
             this.unmask = unmask;
             this.collectWritetimes = collectWritetimes;
@@ -344,11 +340,6 @@ public abstract class Selector
         {
             return collectWritetimes ? RowTimestamps.newInstance(type, columns)
                                      : RowTimestamps.NOOP_ROW_TIMESTAMPS;
-        }
-
-        public ProtocolVersion getProtocolVersion()
-        {
-            return protocolVersion;
         }
 
         public boolean unmask()
@@ -414,7 +405,7 @@ public abstract class Selector
                 UserType udt = (UserType) type;
                 int size = udt.size();
 
-                values[index] = udt.serializeForNativeProtocol(ccd.iterator(), protocolVersion);
+                values[index] = udt.serializeForNativeProtocol(ccd.iterator());
 
                 short fieldPosition = 0;
                 for (Cell<?> cell : ccd)
@@ -524,18 +515,17 @@ public abstract class Selector
     /**
      * Returns the selector output.
      *
-     * @param protocolVersion protocol version used for serialization
      * @return the selector output
      * @throws InvalidRequestException if a problem occurs while computing the output value
      */
-    public abstract ByteBuffer getOutput(ProtocolVersion protocolVersion) throws InvalidRequestException;
+    public abstract ByteBuffer getOutput() throws InvalidRequestException;
 
-    ColumnTimestamps getWritetimes(ProtocolVersion protocolVersion)
+    ColumnTimestamps getWritetimes()
     {
         throw new UnsupportedOperationException();
     }
 
-    ColumnTimestamps getTTLs(ProtocolVersion protocolVersion)
+    ColumnTimestamps getTTLs()
     {
         throw new UnsupportedOperationException();
     }

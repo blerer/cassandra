@@ -33,7 +33,6 @@ import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.transport.ProtocolVersion;
 
 /**
  * <code>Selector</code> for literal list (e.g. [min(value), max(value), count(value)]).
@@ -94,12 +93,13 @@ final class ListSelector extends Selector
             elements.get(i).addInput(input);
     }
 
-    public ByteBuffer getOutput(ProtocolVersion protocolVersion)
+    @Override
+    public ByteBuffer getOutput()
     {
         List<ByteBuffer> buffers = new ArrayList<>(elements.size());
         for (int i = 0, m = elements.size(); i < m; i++)
         {
-            buffers.add(elements.get(i).getOutput(protocolVersion));
+            buffers.add(elements.get(i).getOutput());
         }
         return type.pack(buffers);
     }

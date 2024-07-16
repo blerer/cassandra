@@ -98,7 +98,6 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Types;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
-import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.AbstractTypeGenerators;
 import org.apache.cassandra.utils.AbstractTypeGenerators.Releaser;
 import org.apache.cassandra.utils.AbstractTypeGenerators.TypeGenBuilder;

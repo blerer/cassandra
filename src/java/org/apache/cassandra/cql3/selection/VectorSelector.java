@@ -35,7 +35,6 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.transport.ProtocolVersion;
 
 public class VectorSelector extends Selector
 {
@@ -120,11 +119,11 @@ public class VectorSelector extends Selector
     }
 
     @Override
-    public ByteBuffer getOutput(ProtocolVersion protocolVersion) throws InvalidRequestException
+    public ByteBuffer getOutput() throws InvalidRequestException
     {
         List<ByteBuffer> buffers = new ArrayList<>(elements.size());
         for (int i = 0, m = elements.size(); i < m; i++)
-            buffers.add(elements.get(i).getOutput(protocolVersion));
+            buffers.add(elements.get(i).getOutput());
 
         return type.pack(buffers);
     }
