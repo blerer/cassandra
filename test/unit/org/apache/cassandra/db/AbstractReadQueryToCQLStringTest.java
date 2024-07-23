@@ -789,7 +789,7 @@ public class AbstractReadQueryToCQLStringTest extends CQLTester
         else
         {
             assertTrue(readQuery instanceof AbstractReadQuery);
-            return Collections.singletonList(((AbstractReadQuery) readQuery).toCQLString());
+            return Collections.singletonList(readQuery.toCQLString());
         }
     }
 

@@ -457,7 +457,8 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
         return Verb.RANGE_REQ;
     }
 
-    protected void appendCQLWhereClause(StringBuilder sb)
+    @Override
+    public void appendCQLWhereClause(StringBuilder sb)
     {
         String filterString = dataRange().toCQLString(metadata(), rowFilter());
         if (!filterString.isEmpty())
@@ -467,10 +468,7 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
     @Override
     public String loggableTokens()
     {
-        return "token range: " + (dataRange.keyRange.inclusiveLeft() ? '[' : '(') +
-               dataRange.keyRange.left.getToken().toString() + ", " +
-               dataRange.keyRange.right.getToken().toString() +
-               (dataRange.keyRange.inclusiveRight() ? ']' : ')');
+        return "token range: " + dataRange.keyRange;
     }
 
     /**

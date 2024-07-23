@@ -55,51 +55,20 @@ public final class ResultSetBuilder
      */
     private Selector.InputRow inputRow;
 
-    private long sizeInBytes;
-    private boolean sizeWarningEmitted = false;
+    private final Listener listener;
 
-    public ResultSetBuilder(ResultMetadata metadata, Selectors selectors, boolean unmask)
-    {
-        this(metadata, selectors, unmask, null);
-    }
-
-    public ResultSetBuilder(ResultMetadata metadata, Selectors selectors, boolean unmask, GroupMaker groupMaker)
+    public ResultSetBuilder(ResultMetadata metadata,
+                            Selectors selectors,
+                            boolean unmask,
+                            GroupMaker groupMaker,
+                            Listener listener)
     {
         this.resultSet = new ResultSet(metadata.copy(), new ArrayList<>());
         this.selectors = selectors;
         this.groupMaker = groupMaker;
         this.unmask = unmask;
+        this.listener = listener;
     }
-
-    private void addSize(List<ByteBuffer> row)
-    {
-        for (int i = 0, m = row.size(); i < m; i++)
-        {
-            ByteBuffer value = row.get(i);
-            sizeInBytes += value != null ? value.remaining() : 0;
-        }
-    }
-
-    public boolean shouldWarn(long thresholdBytes)
-    {
-        if (thresholdBytes != -1 && !sizeWarningEmitted && sizeInBytes > thresholdBytes)
-        {
-            sizeWarningEmitted = true;
-            return true;
-        }
-        return false;
-    }
-
-    public boolean shouldReject(long thresholdBytes)
-    {
-        return thresholdBytes != -1 && sizeInBytes > thresholdBytes;
-    }
-
-    public long sizeInBytes()
-    {
-        return sizeInBytes;
-    }
-
 
     public void addStaticRow(DecoratedKey partitionKey, ByteBuffer[] pratitionKeyComponents, Row staticRow, long nowInSec)
     {
@@ -195,13 +164,36 @@ public final class ResultSetBuilder
         // For aggregates we need to return a row even it no records have been found
         if (resultSet.isEmpty() && groupMaker != null && groupMaker.returnAtLeastOneRow())
             resultSet.addRow(getOutputRow());
+
+        listener.onResultSetBuilt();
+
         return resultSet;
     }
 
     private List<ByteBuffer> getOutputRow()
     {
         List<ByteBuffer> row = selectors.getOutputRow();
-        addSize(row);
+        listener.onRowAdded(row);
         return row;
+    }
+
+    public interface Listener
+    {
+        Listener NOOP = new Listener()
+        {
+            @Override
+            public void onRowAdded(List<ByteBuffer> row)
+            {
+            }
+
+            @Override
+            public void onResultSetBuilt()
+            {
+            }
+        };
+
+        void onRowAdded(List<ByteBuffer> row);
+
+        void onResultSetBuilt();
     }
 }

@@ -36,6 +36,7 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.pager.MultiPartitionPager;
 import org.apache.cassandra.service.pager.PagingState;
@@ -281,10 +282,67 @@ public interface SinglePartitionReadQuery extends ReadQuery
         }
 
         @Override
-        public String toString()
+        public final String loggableTokens()
         {
-            return queries.toString();
+            if (queries.size() == 1)
+                return queries.get(0).loggableTokens();
+
+            StringBuilder sb = new StringBuilder("tokens: [");
+
+            for (int i = 0, m = queries.size(); i <m; i++)
+            {
+                if (i != 0)
+                    sb.append(", ");
+                SinglePartitionReadQuery query = queries.get(i);
+                sb.append(query.metadata().partitioner.getToken(query.partitionKey().getKey()).toString());
+            }
+            return sb.append(']').toString();
         }
+
+        @Override
+        public void appendCQLWhereClause(StringBuilder sb)
+        {
+            if (queries.size() == 1)
+            {
+                queries.get(0).appendCQLWhereClause(sb);
+            }
+            else
+            {
+                sb.append(" WHERE ");
+                List<ColumnMetadata> columns = metadata().partitionKeyColumns();
+                List<ByteBuffer[]> values = new ArrayList<>(queries.size());
+
+                for (int i = 0, m = queries.size(); i < m; i++)
+                {
+                    values.add(metadata().partitionKeyComponents(queries.get(i).partitionKey()));
+                }
+
+                for (int i = 0, m = columns.size(); i < m; i++)
+                {
+                    if (i > 0)
+                        sb.append(" AND ");
+                    ColumnMetadata column = columns.get(i);
+                    sb.append(column.name).append(" IN (");
+                    for (int j = 0, n = values.size(); j < n; j++)
+                    {
+                        if (j > 0)
+                            sb.append(", ");
+                        sb.append(column.type.toCQLString(values.get(j)[i]));
+                    }
+                    sb.append(')');
+                }
+
+                ClusteringIndexFilter clusteringIndexFilter = queries.get(0).clusteringIndexFilter();
+                String filterString = clusteringIndexFilter.toCQLString(metadata(), rowFilter());
+                if (!filterString.isEmpty())
+                {
+                    if (!clusteringIndexFilter.selectsAllPartition() || !rowFilter().isEmpty())
+                        sb.append(" AND ");
+                    sb.append(filterString);
+                }
+            }
+        }
+
 
         public static final class Builder extends ReadQuery.Builder
         {

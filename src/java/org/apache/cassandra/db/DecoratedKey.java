@@ -23,7 +23,6 @@ import java.util.List;
 import java.util.StringJoiner;
 import java.util.function.BiFunction;
 
-import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.dht.Token.KeyBound;
@@ -173,7 +172,7 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
         if (columns.size() == 1)
             return toCQLString(columns.get(0), getKey());
 
-        ByteBuffer[] values = ((CompositeType) metadata.partitionKeyType).split(getKey());
+        ByteBuffer[] values = metadata.partitionKeyComponents(this);
         StringJoiner joiner = new StringJoiner(" AND ");
 
         for (int i = 0; i < columns.size(); i++)

@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.db;
 
+import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -116,6 +117,23 @@ public interface ReadQuery
             public ColumnFilter columnFilter()
             {
                 return ColumnFilter.NONE;
+            }
+
+            @Override
+            public String toCQLString()
+            {
+                return "EMPTY";
+            }
+
+            @Override
+            public void appendCQLWhereClause(StringBuilder sb)
+            {
+            }
+
+            @Override
+            public String loggableTokens()
+            {
+                return "EMPTY";
             }
         };
     }
@@ -232,6 +250,50 @@ public interface ReadQuery
      * @return which columns must be fetched by this query.
      */
     ColumnFilter columnFilter();
+
+    /**
+     * Recreate the CQL string corresponding to this query.
+     * <p>
+     * Note that in general the returned string will not be exactly the original user string, first
+     * because there isn't always a single syntax for a given query,  but also because we don't have
+     * all the information needed (we know the non-PK columns queried but not the PK ones as internally
+     * we query them all). So this shouldn't be relied too strongly, but this should be good enough for
+     * debugging purpose which is what this is for.
+     */
+    /**
+     * Recreate the CQL string corresponding to this query.
+     * <p>
+     * Note that in general the returned string will not be exactly the original user string, first
+     * because there isn't always a single syntax for a given query,  but also because we don't have
+     * all the information needed (we know the non-PK columns queried but not the PK ones as internally
+     * we query them all). So this shouldn't be relied too strongly, but this should be good enough for
+     * debugging purpose which is what this is for.
+     */
+    default String toCQLString()
+    {
+        StringBuilder sb = new StringBuilder().append("SELECT ")
+                                              .append(columnFilter().toCQLString())
+                                              .append(" FROM ")
+                                              .append(ColumnIdentifier.maybeQuote(metadata().keyspace))
+                                              .append('.')
+                                              .append(ColumnIdentifier.maybeQuote(metadata().name));
+        appendCQLWhereClause(sb);
+
+        if (limits() != DataLimits.NONE)
+            sb.append(' ').append(limits());
+
+        // ALLOW FILTERING might not be strictly necessary
+        sb.append(" ALLOW FILTERING");
+
+        return sb.toString();
+    }
+
+    void appendCQLWhereClause(StringBuilder sb);
+
+    /**
+     * Return the queried token(s) for logging
+     */
+    String loggableTokens();
 
     /**
      * Whether this query is known to return nothing upfront.

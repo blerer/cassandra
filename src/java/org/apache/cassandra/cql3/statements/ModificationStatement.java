@@ -41,9 +41,7 @@ import org.apache.cassandra.cql3.conditions.ColumnConditions;
 import org.apache.cassandra.cql3.conditions.Conditions;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
-import org.apache.cassandra.cql3.selection.ResultSetBuilder;
 import org.apache.cassandra.cql3.selection.Selection;
-import org.apache.cassandra.cql3.selection.Selection.Selectors;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.marshal.BooleanType;
@@ -672,12 +670,10 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
             selection = Selection.forColumns(metadata, new ArrayList<>(defs), false);
         }
 
-        Selectors selectors = selection.newSelectors(options);
-        ResultSetBuilder builder = new ResultSetBuilder(selection.getResultMetadata(), selectors, false);
-        SelectStatement.forSelection(metadata, selection)
-                       .processPartition(partition, options, builder, nowInSeconds);
-
-        return builder.build();
+        return SelectionProcessor.newBuilder(metadata, selection, options, nowInSeconds)
+                                 .returnStaticContentOnPartitionWithNoRows(true)
+                                 .build()
+                                 .process(PartitionIterators.singletonIterator(partition));
     }
 
     public ResultMessage executeLocally(QueryState queryState, QueryOptions options) throws RequestValidationException, RequestExecutionException

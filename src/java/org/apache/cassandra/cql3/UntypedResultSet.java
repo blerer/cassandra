@@ -31,26 +31,14 @@ import java.util.UUID;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import com.datastax.driver.core.CodecUtils;
 import org.apache.cassandra.cql3.functions.types.LocalDate;
-import org.apache.cassandra.cql3.statements.SelectStatement;
-import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.ConsistencyLevel;
-import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.cql3.statements.SelectionProcessor;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.db.partitions.PartitionIterator;
-import org.apache.cassandra.db.rows.Cell;
-import org.apache.cassandra.db.rows.ComplexColumnData;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.pager.QueryPager;
-import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.utils.AbstractIterator;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.TimeUUID;
 
 /** a utility for doing internal cql-based queries */
@@ -66,23 +54,9 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
         return new FromResultList(results);
     }
 
-    public static UntypedResultSet create(SelectStatement select, QueryPager pager, int pageSize)
+    public static UntypedResultSet create(SelectionProcessor processor, QueryPager pager, int pageSize)
     {
-        return new FromPager(select, pager, pageSize);
-    }
-
-    /**
-     * This method is intended for testing purposes, since it executes query on cluster
-     * and not on the local node only.
-     */
-    @VisibleForTesting
-    public static UntypedResultSet create(SelectStatement select,
-                                          ConsistencyLevel cl,
-                                          ClientState clientState,
-                                          QueryPager pager,
-                                          int pageSize)
-    {
-        return new FromDistributedPager(select, cl, clientState, pager, pageSize);
+        return new FromPager(processor, pager, pageSize);
     }
 
     public boolean isEmpty()
@@ -187,17 +161,17 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
 
     private static class FromPager extends UntypedResultSet
     {
-        private final SelectStatement select;
+        private final SelectionProcessor processor;
         private final QueryPager pager;
         private final int pageSize;
         private final List<ColumnSpecification> metadata;
 
-        private FromPager(SelectStatement select, QueryPager pager, int pageSize)
+        private FromPager(SelectionProcessor processor, QueryPager pager, int pageSize)
         {
-            this.select = select;
+            this.processor = processor;
             this.pager = pager;
             this.pageSize = pageSize;
-            this.metadata = select.getResultMetadata().requestNames();
+            this.metadata = processor.getResultMetadata().requestNames();
         }
 
         public int size()
@@ -218,7 +192,6 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
 
                 protected Row computeNext()
                 {
-                    long nowInSec = FBUtilities.nowInSeconds();
                     while (currentPage == null || !currentPage.hasNext())
                     {
                         if (pager.isExhausted())
@@ -227,72 +200,7 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
                         try (ReadExecutionController executionController = pager.executionController();
                              PartitionIterator iter = pager.fetchPageInternal(pageSize, executionController))
                         {
-                            currentPage = select.process(iter, nowInSec, true, ClientState.forInternalCalls()).rows.iterator();
-                        }
-                    }
-                    return new Row(metadata, currentPage.next());
-                }
-            };
-        }
-
-        public List<ColumnSpecification> metadata()
-        {
-            return metadata;
-        }
-    }
-
-    /**
-     * Pager that calls `execute` rather than `executeInternal`
-     */
-    private static class FromDistributedPager extends UntypedResultSet
-    {
-        private final SelectStatement select;
-        private final ConsistencyLevel cl;
-        private final ClientState clientState;
-        private final QueryPager pager;
-        private final int pageSize;
-        private final List<ColumnSpecification> metadata;
-
-        private FromDistributedPager(SelectStatement select,
-                                     ConsistencyLevel cl,
-                                     ClientState clientState,
-                                     QueryPager pager, int pageSize)
-        {
-            this.select = select;
-            this.cl = cl;
-            this.clientState = clientState;
-            this.pager = pager;
-            this.pageSize = pageSize;
-            this.metadata = select.getResultMetadata().requestNames();
-        }
-
-        public int size()
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        public Row one()
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        public Iterator<Row> iterator()
-        {
-            return new AbstractIterator<Row>()
-            {
-                private Iterator<List<ByteBuffer>> currentPage;
-
-                protected Row computeNext()
-                {
-                    long nowInSec = FBUtilities.nowInSeconds();
-                    while (currentPage == null || !currentPage.hasNext())
-                    {
-                        if (pager.isExhausted())
-                            return endOfData();
-
-                        try (PartitionIterator iter = pager.fetchPage(pageSize, cl, clientState, Dispatcher.RequestTime.forImmediateExecution()))
-                        {
-                            currentPage = select.process(iter, nowInSec, true, clientState).rows.iterator();
+                            currentPage = processor.process(iter).rows.iterator();
                         }
                     }
                     return new Row(metadata, currentPage.next());
@@ -321,37 +229,6 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
             this.columns.addAll(names);
             for (int i = 0; i < names.size(); i++)
                 data.put(names.get(i).name.toString(), columns.get(i));
-        }
-
-        public static Row fromInternalRow(TableMetadata metadata, DecoratedKey key, org.apache.cassandra.db.rows.Row row)
-        {
-            Map<String, ByteBuffer> data = new HashMap<>();
-
-            ByteBuffer[] keyComponents = SelectStatement.keyComponents(metadata, key);
-            for (ColumnMetadata def : metadata.partitionKeyColumns())
-                data.put(def.name.toString(), keyComponents[def.position()]);
-
-            Clustering<?> clustering = row.clustering();
-            for (ColumnMetadata def : metadata.clusteringColumns())
-                data.put(def.name.toString(), clustering.bufferAt(def.position()));
-
-            for (ColumnMetadata def : metadata.regularAndStaticColumns())
-            {
-                if (def.isSimple())
-                {
-                    Cell<?> cell = row.getCell(def);
-                    if (cell != null)
-                        data.put(def.name.toString(), cell.buffer());
-                }
-                else
-                {
-                    ComplexColumnData complexData = row.getComplexColumnData(def);
-                    if (complexData != null)
-                        data.put(def.name.toString(), ((CollectionType<?>) def.type).serializeForNativeProtocol(complexData.iterator()));
-                }
-            }
-
-            return new Row(data);
         }
 
         public boolean has(String column)

@@ -1197,7 +1197,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     }
 
     @Override
-    protected void appendCQLWhereClause(StringBuilder sb)
+    public void appendCQLWhereClause(StringBuilder sb)
     {
         sb.append(" WHERE ").append(partitionKey().toCQLString(metadata()));
 

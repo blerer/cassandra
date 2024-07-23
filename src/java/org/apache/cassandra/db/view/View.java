@@ -149,8 +149,9 @@ public class View
      */
     public boolean matchesViewFilter(DecoratedKey partitionKey, Row baseRow, long nowInSec)
     {
-        return getReadQuery().selectsClustering(partitionKey, baseRow.clustering())
-            && getSelectStatement().rowFilterForInternalCalls().isSatisfiedBy(baseCfs.metadata(), partitionKey, baseRow, nowInSec);
+        ReadQuery readQuery = getReadQuery();
+        return readQuery.selectsClustering(partitionKey, baseRow.clustering())
+               && readQuery.rowFilter().isSatisfiedBy(baseCfs.metadata(), partitionKey, baseRow, nowInSec);
     }
 
     /**

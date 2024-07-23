@@ -54,6 +54,7 @@ import org.apache.cassandra.cql3.functions.masking.ColumnMask;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.Columns;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RegularAndStaticColumns;
@@ -612,6 +613,26 @@ public class TableMetadata implements SchemaElement
     public ClusteringComparator partitionKeyAsClusteringComparator()
     {
         return new ClusteringComparator(partitionKeyColumns.stream().map(c -> c.type).collect(toList()));
+    }
+
+
+    /**
+     * Returns the partition key components of the specified key.
+     *
+     * @param dk the partition key;
+     * @return the partition key components
+     */
+    public ByteBuffer[] partitionKeyComponents(DecoratedKey dk)
+    {
+        ByteBuffer key = dk.getKey();
+        // The partition key can be a composite for 2 reasons:
+        // 1. it is composed of a single column of composite type
+        // 2. it is comosed of multiple columns and is, therefore, a composite.
+        // If we are in case 2. we need to split the key into its components.
+        if (partitionKeyColumns().size() != 1 && partitionKeyType instanceof CompositeType)
+            return ((CompositeType) partitionKeyType).split(key);
+
+        return new ByteBuffer[]{ key };
     }
 
     /**
@@ -1256,7 +1277,7 @@ public class TableMetadata implements SchemaElement
             return this;
         }
     }
-    
+
     /**
      * A table with strict liveness filters/ignores rows without PK liveness info,
      * effectively tying the row liveness to its primary key liveness.

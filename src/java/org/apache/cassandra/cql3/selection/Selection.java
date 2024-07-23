@@ -21,8 +21,6 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import com.google.common.base.MoreObjects;
-import com.google.common.base.Predicate;
-import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 
@@ -38,12 +36,6 @@ import org.apache.cassandra.utils.JsonUtils;
 
 public abstract class Selection
 {
-    /**
-     * A predicate that returns <code>true</code> for static columns.
-     */
-    private static final Predicate<ColumnMetadata> STATIC_COLUMN_FILTER = (column) -> column.isStatic();
-
-    private final TableMetadata table;
     private final List<ColumnMetadata> columns;
     private final SelectionColumnMapping columnMapping;
     protected final ResultSet.ResultMetadata metadata;
@@ -53,14 +45,12 @@ public abstract class Selection
     // Columns used to order the result set for JSON queries with post ordering.
     protected final List<ColumnMetadata> orderingColumns;
 
-    protected Selection(TableMetadata table,
-                        List<ColumnMetadata> selectedColumns,
+    protected Selection(List<ColumnMetadata> selectedColumns,
                         Set<ColumnMetadata> orderingColumns,
                         SelectionColumnMapping columnMapping,
                         ColumnFilterFactory columnFilterFactory,
                         boolean isJson)
     {
-        this.table = table;
         this.columns = selectedColumns;
         this.columnMapping = columnMapping;
         this.metadata = new ResultSet.ResultMetadata(columnMapping.getColumnSpecifications());
@@ -79,21 +69,6 @@ public abstract class Selection
     public boolean isWildcard()
     {
         return false;
-    }
-
-    /**
-     * Checks if this selection contains static columns.
-     * @return <code>true</code> if this selection contains static columns, <code>false</code> otherwise;
-     */
-    public boolean containsStaticColumns()
-    {
-        if (table.isStaticCompactTable() || !table.hasStaticColumns())
-            return false;
-
-        if (isWildcard())
-            return true;
-
-        return !Iterables.isEmpty(Iterables.filter(columns, STATIC_COLUMN_FILTER));
     }
 
     /**
@@ -406,8 +381,7 @@ public abstract class Selection
                                boolean isJson,
                                boolean returnStaticContentOnPartitionWithNoRows)
         {
-            this(table,
-                 selectedColumns,
+            this(selectedColumns,
                  orderingColumns,
                  SelectionColumnMapping.simpleMapping(selectedColumns),
                  isWildcard ? ColumnFilterFactory.wildcard(table)
@@ -424,8 +398,7 @@ public abstract class Selection
                                boolean isJson,
                                boolean returnStaticContentOnPartitionWithNoRows)
         {
-            this(table,
-                 selectedColumns,
+            this(selectedColumns,
                  orderingColumns,
                  mapping,
                  ColumnFilterFactory.fromColumns(table, selectedColumns, orderingColumns, nonPKRestrictedColumns, returnStaticContentOnPartitionWithNoRows),
@@ -433,8 +406,7 @@ public abstract class Selection
                  isJson);
         }
 
-        private SimpleSelection(TableMetadata table,
-                                List<ColumnMetadata> selectedColumns,
+        private SimpleSelection(List<ColumnMetadata> selectedColumns,
                                 Set<ColumnMetadata> orderingColumns,
                                 SelectionColumnMapping mapping,
                                 ColumnFilterFactory columnFilterFactory,
@@ -446,7 +418,7 @@ public abstract class Selection
              * could filter those duplicate out of columns. But since we're very unlikely to
              * get much duplicate in practice, it's more efficient not to bother.
              */
-            super(table, selectedColumns, orderingColumns, mapping, columnFilterFactory, isJson);
+            super(selectedColumns, orderingColumns, mapping, columnFilterFactory, isJson);
             this.isWildcard = isWildcard;
         }
 
@@ -539,8 +511,7 @@ public abstract class Selection
                                        boolean isJson,
                                        boolean returnStaticContentOnPartitionWithNoRows)
         {
-            super(table,
-                  columns,
+            super(columns,
                   orderingColumns,
                   metadata,
                   ColumnFilterFactory.fromSelectorFactories(table, factories, orderingColumns, nonPKRestrictedColumns, returnStaticContentOnPartitionWithNoRows),

@@ -204,26 +204,6 @@ public class PartitionUpdate extends AbstractBTreePartition
         return new PartitionUpdate(iterator.metadata(), iterator.metadata().epoch, iterator.partitionKey(), holder, deletionInfo, false);
     }
 
-    /**
-     * Turns the given iterator into an update.
-     *
-     * @param iterator the iterator to turn into updates.
-     * @param filter the column filter used when querying {@code iterator}. This is used to make
-     * sure we don't include data for which the value has been skipped while reading (as we would
-     * then be writing something incorrect).
-     *
-     * Warning: this method does not close the provided iterator, it is up to
-     * the caller to close it.
-     */
-    public static PartitionUpdate fromIterator(RowIterator iterator, ColumnFilter filter)
-    {
-        iterator = RowIterators.withOnlyQueriedData(iterator, filter);
-        MutableDeletionInfo deletionInfo = MutableDeletionInfo.live();
-        BTreePartitionData holder = build(iterator, deletionInfo, true);
-        return new PartitionUpdate(iterator.metadata(), iterator.metadata().epoch, iterator.partitionKey(), holder, deletionInfo, false);
-    }
-
-
     public PartitionUpdate withOnlyPresentColumns()
     {
         Set<ColumnMetadata> columnSet = new HashSet<>();

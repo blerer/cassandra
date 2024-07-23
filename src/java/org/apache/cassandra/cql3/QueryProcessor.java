@@ -48,11 +48,12 @@ import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.functions.FunctionName;
 import org.apache.cassandra.cql3.functions.UDAggregate;
 import org.apache.cassandra.cql3.functions.UDFunction;
-import org.apache.cassandra.cql3.selection.ResultSetBuilder;
 import org.apache.cassandra.cql3.statements.BatchStatement;
+import org.apache.cassandra.cql3.statements.ExecutionPlan;
 import org.apache.cassandra.cql3.statements.ModificationStatement;
 import org.apache.cassandra.cql3.statements.QualifiedStatement;
 import org.apache.cassandra.cql3.statements.SelectStatement;
+import org.apache.cassandra.cql3.statements.SelectionProcessor;
 import org.apache.cassandra.cql3.statements.schema.AlterSchemaStatement;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DecoratedKey;
@@ -66,7 +67,6 @@ import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionIterators;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.exceptions.CassandraException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.IsBootstrappingException;
@@ -492,7 +492,8 @@ public class QueryProcessor implements QueryHandler
         if (prepared.statement instanceof SelectStatement)
         {
             SelectStatement select = (SelectStatement) prepared.statement;
-            ReadQuery readQuery = select.getQuery(options, nowInSec);
+            ExecutionPlan<ResultSet> plan = select.executionPlan(internalQueryState(), options);
+            ReadQuery readQuery = plan.readQuery();
             List<ReadCommand> commands;
             if (readQuery instanceof ReadCommand)
             {
@@ -515,25 +516,18 @@ public class QueryProcessor implements QueryHandler
                                                                                       .map(rc -> Message.out(rc.verb(), rc))
                                                                                       .map(m -> MessagingService.instance().<ReadCommand, ReadResponse>sendWithResult(m, address))
                                                                                       .collect(Collectors.toList()));
-
-            ResultSetBuilder result = new ResultSetBuilder(select.getResultMetadata(), select.getSelection().newSelectors(options), false);
-            return future.map(list -> {
-                int i = 0;
-                for (Message<ReadResponse> m : list)
+            return future.map(messages -> {
+                List<PartitionIterator> partitionIterators = new ArrayList<>();
+                for (int i = 0, m = messages.size(); i < m; i++)
                 {
-                    ReadResponse rsp = m.payload;
-                    try (PartitionIterator it = UnfilteredPartitionIterators.filter(rsp.makeIterator(commands.get(i++)), nowInSec))
-                    {
-                        while (it.hasNext())
-                        {
-                            try (RowIterator partition = it.next())
-                            {
-                                select.processPartition(partition, options, result, nowInSec);
-                            }
-                        }
-                    }
+                    ReadResponse rsp = messages.get(i).payload;
+                    partitionIterators.add(UnfilteredPartitionIterators.filter(rsp.makeIterator(commands.get(i)), nowInSec));
                 }
-                return result.build();
+
+                try (PartitionIterator it = PartitionIterators.concat(partitionIterators))
+                {
+                    return plan.processor().process(it);
+                }
             }).map(UntypedResultSet::create);
         }
         throw new IllegalArgumentException("Unable to execute query; only SELECT supported but given: " + query);
@@ -579,11 +573,11 @@ public class QueryProcessor implements QueryHandler
         if (!(prepared.statement instanceof SelectStatement))
             throw new IllegalArgumentException("Only SELECTs can be paged");
 
-        SelectStatement select = (SelectStatement)prepared.statement;
-        long nowInSec = FBUtilities.nowInSeconds();
-        ReadQuery readQuery = select.getQuery(makeInternalOptionsWithNowInSec(prepared.statement, nowInSec, values), nowInSec);
-        QueryPager pager = readQuery.getPager(null, ProtocolVersion.CURRENT);
-        return UntypedResultSet.create(select, pager, pageSize);
+        SelectStatement select = (SelectStatement) prepared.statement;
+        ExecutionPlan<ResultSet> plan = select.executionPlan(QueryState.forInternalCalls(), makeInternalOptions(prepared.statement, values));
+
+        QueryPager pager = plan.readQuery().getPager(null, ProtocolVersion.CURRENT);
+        return UntypedResultSet.create((SelectionProcessor) plan.processor(), pager, pageSize);
     }
 
     /**
@@ -618,21 +612,6 @@ public class QueryProcessor implements QueryHandler
     }
 
     /**
-     * A special version of executeLocally that takes the time used as "now" for the query in argument.
-     * Note that this only make sense for Selects so this only accept SELECT statements and is only useful in rare
-     * cases.
-     */
-    public static UntypedResultSet executeInternalWithNow(long nowInSec, Dispatcher.RequestTime requestTime, String query, Object... values)
-    {
-        Prepared prepared = prepareInternal(query);
-        assert prepared.statement instanceof SelectStatement;
-        SelectStatement select = (SelectStatement)prepared.statement;
-        ResultMessage result = select.executeInternal(internalQueryState(), makeInternalOptionsWithNowInSec(prepared.statement, nowInSec, values), nowInSec, requestTime);
-        assert result instanceof ResultMessage.Rows;
-        return UntypedResultSet.create(((ResultMessage.Rows)result).result);
-    }
-
-    /**
      * A special version of executeInternal that takes the time used as "now" for the query in argument.
      * Note that this only make sense for Selects so this only accept SELECT statements and is only useful in rare
      * cases.
@@ -643,23 +622,6 @@ public class QueryProcessor implements QueryHandler
         assert prepared.statement instanceof SelectStatement;
         SelectStatement select = (SelectStatement) prepared.statement;
         return select.executeRawInternal(makeInternalOptionsWithNowInSec(prepared.statement, nowInSec, values), internalQueryState().getClientState(), nowInSec);
-    }
-
-    @VisibleForTesting
-    public static UntypedResultSet resultify(String query, RowIterator partition)
-    {
-        return resultify(query, PartitionIterators.singletonIterator(partition));
-    }
-
-    @VisibleForTesting
-    public static UntypedResultSet resultify(String query, PartitionIterator partitions)
-    {
-        try (PartitionIterator iter = partitions)
-        {
-            SelectStatement ss = (SelectStatement) getStatement(query, null);
-            ResultSet cqlRows = ss.process(iter, FBUtilities.nowInSeconds(), true, ClientState.forInternalCalls());
-            return UntypedResultSet.create(cqlRows);
-        }
     }
 
     public ResultMessage.Prepared prepare(String query,

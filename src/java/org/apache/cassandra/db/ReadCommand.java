@@ -839,8 +839,6 @@ public abstract class ReadCommand extends AbstractReadQuery
 
     public abstract Verb verb();
 
-    protected abstract void appendCQLWhereClause(StringBuilder sb);
-
     // Skip purgeable tombstones. We do this because it's safe to do (post-merge of the memtable and sstable at least), it
     // can save us some bandwith, and avoid making us throw a TombstoneOverwhelmingException for purgeable tombstones (which
     // are to some extend an artefact of compaction lagging behind and hence counting them is somewhat unintuitive).
@@ -864,11 +862,6 @@ public abstract class ReadCommand extends AbstractReadQuery
         }
         return Transformation.apply(iterator, new WithoutPurgeableTombstones());
     }
-
-    /**
-     * Return the queried token(s) for logging
-     */
-    public abstract String loggableTokens();
 
     // Monitorable interface
     public String name()

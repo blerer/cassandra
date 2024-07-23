@@ -32,13 +32,19 @@ import org.junit.runner.RunWith;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.cql3.selection.Selection;
+import org.apache.cassandra.cql3.statements.SelectionProcessor;
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.partitions.PartitionIterators;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.net.MessagingService;
@@ -170,22 +176,33 @@ public class SchemaKeyspaceTest
 
         // Test schema conversion
         Mutation rm = SchemaKeyspace.makeCreateTableMutation(keyspace, metadata, FBUtilities.timestampMicros()).build();
-        PartitionUpdate serializedCf = rm.getPartitionUpdate(Schema.instance.getTableMetadata(SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.TABLES));
-        PartitionUpdate serializedCD = rm.getPartitionUpdate(Schema.instance.getTableMetadata(SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.COLUMNS));
+        TableMetadata tablesMetadata = Schema.instance.getTableMetadata(SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.TABLES);
+        TableMetadata columnsMetadata = Schema.instance.getTableMetadata(SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.COLUMNS);
+        PartitionUpdate serializedCf = rm.getPartitionUpdate(tablesMetadata);
+        PartitionUpdate serializedCD = rm.getPartitionUpdate(columnsMetadata);
 
-        UntypedResultSet.Row tableRow = QueryProcessor.resultify(String.format("SELECT * FROM %s.%s", SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.TABLES),
-                                                                 UnfilteredRowIterators.filter(serializedCf.unfilteredIterator(), FBUtilities.nowInSeconds()))
-                                                      .one();
+        UntypedResultSet.Row tableRow = resultify(tablesMetadata, serializedCf.unfilteredIterator()).one();
         TableParams params = SchemaKeyspace.createTableParamsFromRow(tableRow);
 
-        UntypedResultSet columnsRows = QueryProcessor.resultify(String.format("SELECT * FROM %s.%s", SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.COLUMNS),
-                                                                UnfilteredRowIterators.filter(serializedCD.unfilteredIterator(), FBUtilities.nowInSeconds()));
+        UntypedResultSet columnsRows = resultify(columnsMetadata, serializedCD.unfilteredIterator());
         Set<ColumnMetadata> columns = new HashSet<>();
         for (UntypedResultSet.Row row : columnsRows)
             columns.add(SchemaKeyspace.createColumnFromRow(row, Types.none(), UserFunctions.none()));
 
         assertEquals(metadata.params, params);
         assertEquals(new HashSet<>(metadata.columns()), columns);
+    }
+
+    private static UntypedResultSet resultify(TableMetadata table, UnfilteredRowIterator rowIterator)
+    {
+        long nowInSec = FBUtilities.nowInSeconds();
+        PartitionIterator iterator = PartitionIterators.singletonIterator(UnfilteredRowIterators.filter(rowIterator, nowInSec));
+
+        Selection selection = Selection.wildcard(table, false, true);
+        ResultSet cqlRows = SelectionProcessor.newBuilder(table, selection, QueryOptions.DEFAULT , nowInSec)
+                                              .build()
+                                              .process(iterator);
+        return UntypedResultSet.create(cqlRows);
     }
 
     @Test(expected = SchemaKeyspace.MissingColumns.class)
