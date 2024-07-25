@@ -441,7 +441,7 @@ public class TableViews extends AbstractCollection<View>
             if (!deletionInfo.getPartitionDeletion().isLive())
             {
                 for (View view : views)
-                    sliceBuilder.addAll(view.getSelectStatement().clusteringIndexFilterAsSlices());
+                    sliceBuilder.addAll(view.getReadQuery().clusteringIndexFilter(key).getSlices(metadata));
             }
             else
             {
@@ -486,7 +486,7 @@ public class TableViews extends AbstractCollection<View>
         // If we have more than one view, we should merge the queried columns by each views but to keep it simple we just
         // include everything. We could change that in the future.
         ColumnFilter queriedColumns = views.size() == 1 && metadata.enforceStrictLiveness()
-                                    ? Iterables.getOnlyElement(views).getSelectStatement().queriedColumns()
+                                    ? Iterables.getOnlyElement(views).getReadQuery().columnFilter()
                                     : ColumnFilter.all(metadata);
         // Note that the views could have restrictions on regular columns, but even if that's the case we shouldn't apply those
         // when we read, because even if an existing row doesn't match the view filter, the update can change that in which

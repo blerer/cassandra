@@ -276,6 +276,14 @@ public interface SinglePartitionReadQuery extends ReadQuery
         }
 
         @Override
+        public ClusteringIndexFilter clusteringIndexFilter(DecoratedKey key)
+        {
+            // Note that the only difference between the query in a group must be the partition key on which
+            // they applied.
+            return queries.get(0).clusteringIndexFilter(key);
+        }
+
+        @Override
         public void trackWarnings()
         {
             queries.forEach(ReadQuery::trackWarnings);

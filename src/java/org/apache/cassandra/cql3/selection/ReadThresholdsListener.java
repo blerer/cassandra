@@ -31,7 +31,6 @@ import org.apache.cassandra.db.ReadQuery;
 import org.apache.cassandra.exceptions.ReadSizeAbortException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.utils.FBUtilities;

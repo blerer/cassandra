@@ -59,7 +59,6 @@ public class View
     public volatile List<ColumnMetadata> baseNonPKColumnsInViewPK;
     private ViewBuilder builder;
 
-    private SelectStatement select;
     private ReadQuery query;
 
     public View(ViewMetadata definition, ColumnFamilyStore baseCfs)
@@ -154,36 +153,6 @@ public class View
                && readQuery.rowFilter().isSatisfiedBy(baseCfs.metadata(), partitionKey, baseRow, nowInSec);
     }
 
-    /**
-     * Returns the SelectStatement used to populate and filter this view.  Internal users should access the select
-     * statement this way to ensure it has been prepared.
-     */
-    SelectStatement getSelectStatement()
-    {
-        if (null == select)
-        {
-            SelectStatement.Parameters parameters =
-                new SelectStatement.Parameters(Collections.emptyList(),
-                                               Collections.emptyList(),
-                                               false,
-                                               true,
-                                               false);
-
-            SelectStatement.RawStatement rawSelect =
-                new SelectStatement.RawStatement(new QualifiedName(baseCfs.getKeyspaceName(), baseCfs.name),
-                                                 parameters,
-                                                 selectClause(),
-                                                 definition.whereClause,
-                                                  Limits.Raw.NO_LIMIT);
-
-            rawSelect.setBindVariables(Collections.emptyList());
-
-            select = rawSelect.prepare(ClientState.forInternalCalls(), true);
-        }
-
-        return select;
-    }
-
     private List<RawSelector> selectClause()
     {
         return definition.metadata
@@ -202,7 +171,27 @@ public class View
     ReadQuery getReadQuery()
     {
         if (query == null)
-            query = getSelectStatement().getQuery(QueryOptions.forInternalCalls(Collections.emptyList()), FBUtilities.nowInSeconds());
+        {
+            SelectStatement.Parameters parameters =
+            new SelectStatement.Parameters(Collections.emptyList(),
+                                           Collections.emptyList(),
+                                           false,
+                                           true,
+                                           false);
+
+            SelectStatement.RawStatement rawSelect =
+            new SelectStatement.RawStatement(new QualifiedName(baseCfs.getKeyspaceName(), baseCfs.name),
+                                             parameters,
+                                             selectClause(),
+                                             definition.whereClause,
+                                             Limits.Raw.NO_LIMIT);
+
+            rawSelect.setBindVariables(Collections.emptyList());
+
+            SelectStatement select = rawSelect.prepare(ClientState.forInternalCalls(), true);
+
+            query = select.getQuery(QueryOptions.forInternalCalls(Collections.emptyList()), FBUtilities.nowInSeconds());
+        }
 
         return query;
     }

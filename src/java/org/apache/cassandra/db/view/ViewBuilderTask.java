@@ -45,6 +45,7 @@ import org.apache.cassandra.db.compaction.CompactionInfo;
 import org.apache.cassandra.db.compaction.CompactionInfo.Unit;
 import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
 import org.apache.cassandra.db.rows.Rows;
@@ -100,7 +101,13 @@ public class ViewBuilderTask extends CompactionInfo.Holder implements Callable<L
         }
 
         long nowInSec = FBUtilities.nowInSeconds();
-        SinglePartitionReadCommand command = view.getSelectStatement().internalReadForView(key, nowInSec);
+        SinglePartitionReadCommand command = SinglePartitionReadCommand.create(selectQuery.metadata(),
+                                                                               nowInSec,
+                                                                               selectQuery.columnFilter(),
+                                                                               selectQuery.rowFilter(),
+                                                                               DataLimits.NONE,
+                                                                               key,
+                                                                               selectQuery.clusteringIndexFilter(key));
 
         // We're rebuilding everything from what's on disk, so we read everything, consider that as new updates
         // and pretend that there is nothing pre-existing.

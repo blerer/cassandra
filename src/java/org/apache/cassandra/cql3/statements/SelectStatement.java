@@ -63,20 +63,14 @@ import org.apache.cassandra.cql3.selection.Selectable.WithFunction;
 import org.apache.cassandra.cql3.selection.Selection;
 import org.apache.cassandra.cql3.selection.Selection.Selectors;
 import org.apache.cassandra.cql3.selection.Selector;
-import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.ReadQuery;
-import org.apache.cassandra.db.SinglePartitionReadCommand;
-import org.apache.cassandra.db.Slice;
-import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.aggregation.AggregationSpecification;
 import org.apache.cassandra.db.aggregation.GroupMaker;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
-import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
-import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
@@ -212,15 +206,6 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             aggregationSpecFactory.addFunctionsTo(functions);
 
         limits.addFunctionsTo(functions);
-    }
-
-    /**
-     * The columns to fetch internally for this SELECT statement (which can be more than the one selected by the
-     * user as it also include any restricted column in particular).
-     */
-    public ColumnFilter queriedColumns()
-    {
-        return selection.newSelectors(QueryOptions.DEFAULT).getColumnFilter();
     }
 
     public ResultSet.ResultMetadata getResultMetadata()
@@ -386,13 +371,19 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     }
 
     private ReadQuery readQuery(QueryOptions options,
-                               ClientState state,
-                               ColumnFilter columnFilter,
-                               DataLimits limits,
-                               long nowInSec)
+                                ClientState state,
+                                ColumnFilter columnFilter,
+                                DataLimits limits,
+                                long nowInSec)
     {
+        ClusteringIndexFilter clusteringIndexFilter = restrictions.makeClusteringIndexFilter(options,
+                                                                                             state,
+                                                                                             columnFilter,
+                                                                                             parameters.isDistinct,
+                                                                                             isReversed);
+
         return restrictions.readQueryBuilder(options, state, nowInSec)
-                           .clusteringIndexFilter(makeClusteringIndexFilter(options, state, columnFilter))
+                           .clusteringIndexFilter(clusteringIndexFilter)
                            .rowFilter(restrictions.getRowFilter(options, state))
                            .columnFilter(columnFilter)
                            .dataLimits(limits)
@@ -564,48 +555,6 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     public StatementRestrictions getRestrictions()
     {
         return restrictions;
-    }
-
-    /**
-     * Returns the slices fetched by this SELECT, assuming an internal call (no bound values in particular).
-     * <p>
-     * Note that if the SELECT intrinsically selects rows by names, we convert them into equivalent slices for
-     * the purpose of this method. This is used for MVs to restrict what needs to be read when we want to read
-     * everything that could be affected by a given view (and so, if the view SELECT statement has restrictions
-     * on the clustering columns, we can restrict what we read).
-     */
-    public Slices clusteringIndexFilterAsSlices()
-    {
-        QueryOptions options = QueryOptions.forInternalCalls(Collections.emptyList());
-        ClientState state = ClientState.forInternalCalls();
-        ColumnFilter columnFilter = selection.newSelectors(options).getColumnFilter();
-        ClusteringIndexFilter filter = makeClusteringIndexFilter(options, state, columnFilter);
-        if (filter instanceof ClusteringIndexSliceFilter)
-            return ((ClusteringIndexSliceFilter)filter).requestedSlices();
-
-        Slices.Builder builder = new Slices.Builder(table.comparator);
-        for (Clustering<?> clustering: ((ClusteringIndexNamesFilter)filter).requestedRows())
-            builder.add(Slice.make(clustering));
-        return builder.build();
-    }
-
-    /**
-     * Returns a read command that can be used internally to query all the rows queried by this SELECT for a
-     * give key (used for materialized views).
-     */
-    public SinglePartitionReadCommand internalReadForView(DecoratedKey key, long nowInSec)
-    {
-        QueryOptions options = QueryOptions.forInternalCalls(Collections.emptyList());
-        ClientState state = ClientState.forInternalCalls();
-        ColumnFilter columnFilter = selection.newSelectors(options).getColumnFilter();
-        ClusteringIndexFilter filter = makeClusteringIndexFilter(options, state, columnFilter);
-        RowFilter rowFilter = restrictions.getRowFilter(options, state);
-        return SinglePartitionReadCommand.create(table, nowInSec, columnFilter, rowFilter, DataLimits.NONE, key, filter);
-    }
-
-    private ClusteringIndexFilter makeClusteringIndexFilter(QueryOptions options, ClientState state, ColumnFilter columnFilter)
-    {
-        return restrictions.makeClusteringIndexFilter(options, state, columnFilter, parameters.isDistinct, isReversed);
     }
 
     public static class RawStatement extends QualifiedStatement

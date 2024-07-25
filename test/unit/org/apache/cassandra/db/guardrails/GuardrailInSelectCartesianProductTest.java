@@ -161,26 +161,33 @@ public class GuardrailInSelectCartesianProductTest extends ThresholdTester
         String clusteringsFailMessage = String.format(FAIL_MESSAGE, "clustering key", clusterings);
         String clusteringsWarnMessage = String.format(WARN_MESSAGE, "clustering key", clusterings);
 
-        if (keys > FAIL_THRESHOLD)
-        {
-            assertFails(function, keysFailMessage);
-        }
-        else if (keys > WARN_THRESHOLD)
-        {
-            if (clusterings > FAIL_THRESHOLD)
-                assertFails(function, Arrays.asList(keysWarnMessage, clusteringsFailMessage));
-            else if (clusterings > WARN_THRESHOLD)
-                assertWarns(function, Arrays.asList(keysWarnMessage, clusteringsWarnMessage));
-            else
-                assertWarns(function, keysWarnMessage);
-        }
-        else if (clusterings > FAIL_THRESHOLD)
+        if (clusterings > FAIL_THRESHOLD)
         {
             assertFails(function, clusteringsFailMessage);
         }
         else if (clusterings > WARN_THRESHOLD)
         {
-            assertWarns(function, clusteringsWarnMessage);
+            if (keys > FAIL_THRESHOLD)
+            {
+                assertFails(function, Arrays.asList(clusteringsWarnMessage, keysFailMessage));
+            }
+            else if (keys > WARN_THRESHOLD)
+            {
+                assertWarns(function, Arrays.asList(clusteringsWarnMessage, keysWarnMessage));
+            }
+            else
+            {
+                assertWarns(function, clusteringsWarnMessage);
+            }
+
+        }
+        else if (keys > FAIL_THRESHOLD)
+        {
+            assertFails(function, keysFailMessage);
+        }
+        else if (keys > WARN_THRESHOLD)
+        {
+            assertWarns(function, keysWarnMessage);
         }
         else
         {

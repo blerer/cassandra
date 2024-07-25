@@ -120,6 +120,12 @@ public interface ReadQuery
             }
 
             @Override
+            public ClusteringIndexFilter clusteringIndexFilter(DecoratedKey key)
+            {
+                return null;
+            }
+
+            @Override
             public String toCQLString()
             {
                 return "EMPTY";
@@ -229,6 +235,16 @@ public interface ReadQuery
      * @return {@code true} if this {@code ReadQuery} selects full partitions, {@code false} otherwise.
      */
     boolean selectsFullPartition();
+
+    /**
+     * Filters/Restrictions on clustering columns.
+     * <p>
+     * This is the filter on the clustering columns that is used to select the rows to return. This
+     * is the main filter for a query and is what is used to select the rows to return.
+     *
+     * @return the filter on the clustering columns.
+     */
+    ClusteringIndexFilter clusteringIndexFilter(DecoratedKey key);
 
     /**
      * Filters/Resrictions on CQL rows.
