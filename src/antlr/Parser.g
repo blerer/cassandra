@@ -512,7 +512,7 @@ jsonInsertStatement [QualifiedName qn] returns [UpdateStatement.ParsedInsertJson
     ;
 
 jsonValue returns [Json.Raw value]
-    : s=STRING_LITERAL { $value = new Json.Literal($s.text); }
+    : s=STRING_LITERAL        { $value = new Json.Literal($s.text); }
     | ':' id=noncol_ident     { $value = newJsonBindVariables(id); }
     | QMARK                   { $value = newJsonBindVariables(null); }
     ;

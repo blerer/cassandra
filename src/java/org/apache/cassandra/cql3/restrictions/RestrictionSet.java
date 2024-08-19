@@ -57,8 +57,7 @@ final class RestrictionSet implements Restrictions, Iterable<SingleRestriction>
         }
     };
 
-    private static final RestrictionSet EMPTY = new RestrictionSet(Collections.unmodifiableNavigableMap(new TreeMap<>(COLUMN_DEFINITION_COMPARATOR)),
-                                                                   false, false, false,false);
+    private static final RestrictionSet EMPTY = RestrictionSet.builder().build();
 
     /**
      * The restrictions per column.
@@ -93,6 +92,11 @@ final class RestrictionSet implements Restrictions, Iterable<SingleRestriction>
         this.hasSlice = hasSlice;
         this.hasAnn = hasAnn;
         this.needsFilteringOrIndexing = needsFilteringOrIndexing;
+    }
+
+    static Builder builder()
+    {
+        return new Builder();
     }
 
     @Override
@@ -167,73 +171,6 @@ final class RestrictionSet implements Restrictions, Iterable<SingleRestriction>
         return false;
     }
 
-    /**
-     * Adds the specified restriction to this set of restrictions.
-     *
-     * @param restriction the restriction to add
-     * @return the new set of restrictions
-     */
-    public RestrictionSet addRestriction(SimpleRestriction restriction)
-    {
-        // RestrictionSet is immutable. Therefore, we need to clone the restrictions map.
-        NavigableMap<ColumnMetadata, SingleRestriction> newRestricitons = new TreeMap<>(this.restrictions);
-
-        boolean newHasIN = hasIn || restriction.isIN();
-        boolean newHasSlice = hasSlice || restriction.isSlice();
-        boolean newHasANN = hasAnn || restriction.isANN();
-        boolean newNeedsFilteringOrIndexing = needsFilteringOrIndexing || restriction.needsFilteringOrIndexing();
-
-        return new RestrictionSet(mergeRestrictions(newRestricitons, restriction),
-                                  newHasIN,
-                                  newHasSlice,
-                                  newHasANN,
-                                  newNeedsFilteringOrIndexing);
-    }
-
-    private NavigableMap<ColumnMetadata, SingleRestriction> mergeRestrictions(NavigableMap<ColumnMetadata,SingleRestriction> restrictions,
-                                                                              SimpleRestriction restriction)
-    {
-        Collection<ColumnMetadata> columns = restriction.columns();
-        Set<SingleRestriction> existings = getRestrictions(columns);
-
-        if (existings.isEmpty())
-        {
-            for (ColumnMetadata column : columns)
-                restrictions.put(column, restriction);
-        }
-        else
-        {
-            for (SingleRestriction existing : existings)
-            {
-                SingleRestriction newRestriction = existing.mergeWith(restriction);
-
-                for (ColumnMetadata column : newRestriction.columns())
-                    restrictions.put(column, newRestriction);
-            }
-        }
-
-        return restrictions;
-    }
-
-
-    /**
-     * Returns all the restrictions applied to the specified columns.
-     *
-     * @param columns the column definitions
-     * @return all the restrictions applied to the specified columns
-     */
-    private Set<SingleRestriction> getRestrictions(Collection<ColumnMetadata> columns)
-    {
-        Set<SingleRestriction> set = new HashSet<>();
-        for (ColumnMetadata column : columns)
-        {
-            SingleRestriction existing = restrictions.get(column);
-            if (existing != null)
-                set.add(existing);
-        }
-        return set;
-    }
-
     @Override
     public Index findSupportingIndex(Iterable<Index> indexes)
     {
@@ -300,5 +237,82 @@ final class RestrictionSet implements Restrictions, Iterable<SingleRestriction>
     SingleRestriction lastRestriction()
     {
         return restrictions.lastEntry().getValue();
+    }
+
+    /**
+     * Builder for {@code RestrictionSet} instances
+     */
+    public static final class Builder
+    {
+        /**
+         * The restrictions per column.
+         */
+        private final NavigableMap<ColumnMetadata, SingleRestriction> restrictions = new TreeMap<>(COLUMN_DEFINITION_COMPARATOR);
+
+        private boolean hasSlice;
+
+        private boolean hasIn;
+
+        private boolean hasAnn;
+
+        private boolean needsFilteringOrIndexing;
+
+        /**
+         * Adds the specified restrictions.
+         *
+         * @param restriction the restriction to add
+         * @return this builder
+         */
+        public Builder addRestriction(SimpleRestriction restriction)
+        {
+            hasIn = hasIn || restriction.isIN();
+            hasSlice = hasSlice || restriction.isSlice();
+            hasAnn = hasAnn || restriction.isANN();
+            needsFilteringOrIndexing = needsFilteringOrIndexing || restriction.needsFilteringOrIndexing();
+
+            Collection<ColumnMetadata> columns = restriction.columns();
+            Set<SingleRestriction> existings = getRestrictions(columns);
+
+            if (existings.isEmpty())
+            {
+                for (ColumnMetadata column : columns)
+                    restrictions.put(column, restriction);
+            }
+            else
+            {
+                for (SingleRestriction existing : existings)
+                {
+                    SingleRestriction newRestriction = existing.mergeWith(restriction);
+
+                    for (ColumnMetadata column : newRestriction.columns())
+                        restrictions.put(column, newRestriction);
+                }
+            }
+            return this;
+        }
+
+        private Set<SingleRestriction> getRestrictions(Collection<ColumnMetadata> columns)
+        {
+            Set<SingleRestriction> set = new HashSet<>();
+            for (ColumnMetadata column : columns)
+            {
+                SingleRestriction existing = restrictions.get(column);
+                if (existing != null)
+                    set.add(existing);
+            }
+            return set;
+        }
+
+        RestrictionSet build()
+        {
+            if (restrictions.isEmpty())
+                return empty();
+
+            return new RestrictionSet(Collections.unmodifiableNavigableMap(restrictions),
+                                       hasIn,
+                                       hasSlice,
+                                       hasAnn,
+                                       needsFilteringOrIndexing);
+        }
     }
 }

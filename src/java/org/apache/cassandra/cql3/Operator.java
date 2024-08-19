@@ -65,7 +65,7 @@ public enum Operator
             if (rightOperand == null || leftOperand == null)
                 return ThreeValued.of(rightOperand == leftOperand);
 
-            return ThreeValued.of(perform(type, leftOperand, rightOperand));
+            return ThreeValued.of(compare(type, leftOperand, rightOperand));
         }
 
         @Override
@@ -84,13 +84,13 @@ public enum Operator
         }
 
         @Override
-        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        protected boolean compare(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             return type.compareForCQL(leftOperand, rightOperand) == 0;
         }
 
         @Override
-        protected boolean perform(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        protected boolean compare(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
         {
             return type.compareForCQL(leftOperand, type.unpack(rightOperand)) == 0;
         }
@@ -131,13 +131,13 @@ public enum Operator
         }
 
         @Override
-        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        protected boolean compare(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             return type.compareForCQL(leftOperand, rightOperand) < 0;
         }
 
         @Override
-        protected boolean perform(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        protected boolean compare(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
         {
             return type.compareForCQL(leftOperand, type.unpack(rightOperand)) < 0;
         }
@@ -182,13 +182,13 @@ public enum Operator
         }
 
         @Override
-        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        protected boolean compare(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             return type.compareForCQL(leftOperand, rightOperand) <= 0;
         }
 
         @Override
-        protected boolean perform(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        protected boolean compare(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
         {
             return type.compareForCQL(leftOperand, type.unpack(rightOperand)) <= 0;
         }
@@ -234,13 +234,13 @@ public enum Operator
         }
 
         @Override
-        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        protected boolean compare(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             return type.compareForCQL(leftOperand, rightOperand) >= 0;
         }
 
         @Override
-        protected boolean perform(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        protected boolean compare(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
         {
             return type.compareForCQL(leftOperand, type.unpack(rightOperand)) >= 0;
         }
@@ -285,13 +285,13 @@ public enum Operator
         }
 
         @Override
-        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        protected boolean compare(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             return type.compareForCQL(leftOperand, rightOperand) > 0;
         }
 
         @Override
-        protected boolean perform(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        protected boolean compare(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
         {
             return type.compareForCQL(leftOperand, type.unpack(rightOperand)) > 0;
         }
@@ -354,14 +354,14 @@ public enum Operator
         }
 
         @Override
-        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        protected boolean compare(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             ListSerializer<?> serializer = ListType.getInstance(type, false).getSerializer();
             return serializer.anyMatch(rightOperand, r -> type.compareForCQL(leftOperand, r) == 0);
         }
 
         @Override
-        protected boolean perform(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        protected boolean compare(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
         {
             ListSerializer<?> serializer = ListType.getInstance(type, false).getSerializer();
             return serializer.anyMatch(rightOperand, r -> type.compareForCQL(leftOperand, type.unpack(r)) == 0);
@@ -382,7 +382,7 @@ public enum Operator
     CONTAINS(5)
     {
         @Override
-        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        protected boolean compare(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             switch(((CollectionType<?>) type).kind)
             {
@@ -400,7 +400,7 @@ public enum Operator
         }
 
         @Override
-        protected boolean perform(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        protected boolean compare(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
         {
             return ((CollectionType<?>) type).contains(leftOperand, rightOperand);
         }
@@ -426,14 +426,14 @@ public enum Operator
         }
 
         @Override
-        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        protected boolean compare(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             MapType<?, ?> mapType = (MapType<?, ?>) type;
             return mapType.compose(leftOperand).containsKey(mapType.getKeysType().compose(rightOperand));
         }
 
         @Override
-        protected boolean perform(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        protected boolean compare(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
         {
             return leftOperand.getCell(CellPath.create(rightOperand)) != null;
         }
@@ -465,7 +465,7 @@ public enum Operator
             if (leftOperand == null || rightOperand == null)
                 return ThreeValued.of(leftOperand != rightOperand);
 
-            return ThreeValued.of(perform(type, leftOperand, rightOperand));
+            return ThreeValued.of(compare(type, leftOperand, rightOperand));
         }
 
         @Override
@@ -484,13 +484,13 @@ public enum Operator
         }
 
         @Override
-        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        protected boolean compare(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             return type.compareForCQL(leftOperand, rightOperand) != 0;
         }
 
         @Override
-        protected boolean perform(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+        protected boolean compare(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
         {
             return type.compareForCQL(leftOperand, type.unpack(rightOperand)) != 0;
         }
@@ -560,7 +560,7 @@ public enum Operator
         }
 
         @Override
-        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        protected boolean compare(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             return ByteBufferUtil.startsWith(leftOperand, rightOperand);
         }
@@ -574,7 +574,7 @@ public enum Operator
         }
 
         @Override
-        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        protected boolean compare(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             return ByteBufferUtil.endsWith(leftOperand, rightOperand);
         }
@@ -588,7 +588,7 @@ public enum Operator
         }
 
         @Override
-        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        protected boolean compare(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             return ByteBufferUtil.contains(leftOperand, rightOperand);
         }
@@ -602,7 +602,7 @@ public enum Operator
         }
 
         @Override
-        protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        protected boolean compare(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             return ByteBufferUtil.contains(leftOperand, rightOperand);
         }
@@ -623,7 +623,7 @@ public enum Operator
             return true;
         }
     },
-    IS_NULL(16)
+    IS_NULL(20)
     {
         @Override
         public boolean isUnary()
@@ -742,8 +742,8 @@ public enum Operator
 
         // In order to support operators on Counter types, their value has to be extracted from internal
         // representation. See CASSANDRA-11629
-        boolean result = type.isCounter() ? perform(LongType.instance, toCounterValue(leftOperand), rightOperand)
-                                          : perform(type, leftOperand, rightOperand);
+        boolean result = type.isCounter() ? compare(LongType.instance, toCounterValue(leftOperand), rightOperand)
+                                          : compare(type, leftOperand, rightOperand);
 
         return ThreeValued.of(result);
     }
@@ -776,13 +776,13 @@ public enum Operator
         if (leftOperand == null)
             return ThreeValued.UNKOWN;
 
-        return ThreeValued.of(perform(type, leftOperand, rightOperand));
+        return ThreeValued.of(compare(type, leftOperand, rightOperand));
     }
 
     /**
      * Perform the comparison between the left and right operands.
      */
-    protected boolean perform(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+    protected boolean compare(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
     {
         throw new UnsupportedOperationException();
     }
@@ -790,7 +790,7 @@ public enum Operator
     /**
      * Perform the comparison between the left and right operands.
      */
-    protected boolean perform(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
+    protected boolean compare(MultiElementType<?> type, ComplexColumnData leftOperand, ByteBuffer rightOperand)
     {
         throw new UnsupportedOperationException();
     }

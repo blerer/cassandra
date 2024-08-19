@@ -28,7 +28,6 @@ import com.google.common.collect.ImmutableRangeSet;
 import com.google.common.collect.Range;
 import com.google.common.collect.RangeSet;
 
-import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.guardrails.Guardrails;
@@ -44,8 +43,6 @@ import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.ClusteringPrefix;
 import org.apache.cassandra.db.MultiCBuilder;
 import org.apache.cassandra.service.ClientState;
-
-import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
 /**
  * A set of restrictions on the partition key.
@@ -72,31 +69,18 @@ final class PartitionKeyRestrictions extends RestrictionSetWrapper
         return tokenRestrictions != null && (restrictions.isEmpty() || needFiltering());
     }
 
-    public PartitionKeyRestrictions(ClusteringComparator comparator)
+    private PartitionKeyRestrictions(ClusteringComparator comparator,
+                                     RestrictionSet restrictions,
+                                     SingleRestriction tokenRestrictions)
     {
-        super(RestrictionSet.empty());
+        super(restrictions);
         this.comparator = comparator;
-        this.tokenRestrictions = null;
+        this.tokenRestrictions = tokenRestrictions;
     }
 
-    private PartitionKeyRestrictions(PartitionKeyRestrictions pkRestrictions,
-                                     SimpleRestriction restriction)
+    public static Builder builder(ClusteringComparator comparator)
     {
-        super(restriction.isOnToken() ? pkRestrictions.restrictions
-                                      : pkRestrictions.restrictions.addRestriction(restriction));
-        this.comparator = pkRestrictions.comparator;
-        this.tokenRestrictions = restriction.isOnToken() ? pkRestrictions.tokenRestrictions == null ? restriction
-                                                                                                    : pkRestrictions.tokenRestrictions.mergeWith(restriction)
-                                                         : pkRestrictions.tokenRestrictions;
-    }
-
-    public PartitionKeyRestrictions mergeWith(SimpleRestriction restriction)
-    {
-        Operator operator = restriction.operator();
-        if (restriction.isColumnLevel() && (operator == Operator.IS_NOT_NULL || operator == Operator.IS_NULL))
-            throw invalidRequest("%s is not supported on partition key columns", operator);
-
-        return new PartitionKeyRestrictions(this, restriction);
+        return new Builder(comparator);
     }
 
     @Override
@@ -379,5 +363,40 @@ final class PartitionKeyRestrictions extends RestrictionSetWrapper
     public boolean hasUnrestrictedPartitionKeyComponents()
     {
         return restrictions.size() < comparator.size();
+    }
+
+    public static final class Builder
+    {
+        private final ClusteringComparator comparator;
+
+        /**
+         * The token restrictions or {@code null} if there are no restrictions on tokens.
+         */
+        private SingleRestriction tokenRestrictions;
+
+        private RestrictionSet.Builder restrictions = RestrictionSet.builder();
+
+        public Builder(ClusteringComparator comparator)
+        {
+            this.comparator = comparator;
+        }
+
+        public Builder addRestriction(SimpleRestriction restriction)
+        {
+            if (restriction.isOnToken())
+            {
+                tokenRestrictions = tokenRestrictions == null ? restriction : tokenRestrictions.mergeWith(restriction);
+            }
+            else
+            {
+                restrictions.addRestriction(restriction);
+            }
+            return this;
+        }
+
+        public PartitionKeyRestrictions build()
+        {
+            return new PartitionKeyRestrictions(comparator, restrictions.build(), tokenRestrictions);
+        }
     }
 }

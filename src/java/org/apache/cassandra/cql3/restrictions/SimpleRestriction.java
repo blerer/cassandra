@@ -147,6 +147,18 @@ public final class SimpleRestriction implements SingleRestriction
     @Override
     public SingleRestriction mergeWith(SimpleRestriction other)
     {
+        if (operator == Operator.IS_NULL)
+        {
+            if (other.operator == Operator.IS_NULL)
+                return this;
+            throw invalidRequest("Cannot restrict %s with IS NULL and %s", columnsExpression.toCQLString(), other.operator);
+        }
+
+        if (other.operator == Operator.IS_NULL)
+        {
+            throw invalidRequest("Cannot restrict %s with IS NULL and %s", columnsExpression.toCQLString(), operator);
+        }
+
         if (operator == Operator.IS_NOT_NULL)
             return other;
 

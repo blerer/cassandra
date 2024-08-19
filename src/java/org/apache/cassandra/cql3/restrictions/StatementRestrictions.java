@@ -136,8 +136,8 @@ public final class StatementRestrictions
     {
         this.type = type;
         this.table = table;
-        this.partitionKeyRestrictions = new PartitionKeyRestrictions(table.partitionKeyAsClusteringComparator());
-        this.clusteringColumnsRestrictions = new ClusteringColumnRestrictions(table, allowFiltering);
+        this.partitionKeyRestrictions = PartitionKeyRestrictions.builder(table.partitionKeyAsClusteringComparator()).build();
+        this.clusteringColumnsRestrictions = ClusteringColumnRestrictions.builder(table.comparator).build();
         this.nonPrimaryKeyRestrictions = RestrictionSet.empty();
     }
 
@@ -174,40 +174,10 @@ public final class StatementRestrictions
         final IndexRegistry indexRegistry = type.allowUseOfSecondaryIndices() && allowUseOfSecondaryIndices
                                             ? IndexRegistry.obtain(table)
                                             : null;
-        /*
-         * WHERE clause. For a given entity, rules are:
-         *   - EQ relation conflicts with anything else (including a 2nd EQ)
-         *   - Can't have more than one LT(E) relation (resp. GT(E) relation)
-         *   - IN relation are restricted to row keys (for now) and conflicts with anything else (we could
-         *     allow two IN for the same entity but that doesn't seem very useful)
-         *   - The value_alias cannot be restricted in any way (we don't support wide rows with indexed value
-         *     in CQL so far)
-         *   - CONTAINS and CONTAINS_KEY cannot be used with UPDATE or DELETE
-         */
-        for (Relation relation : whereClause.relations)
-        {
 
-            Operator operator = relation.operator();
-            if (operator.requiresFilteringOrIndexingFor(ColumnMetadata.Kind.CLUSTERING) && (type.isUpdate() || type.isDelete()))
-            {
-                throw invalidRequest("Cannot use %s with %s", type, operator);
-            }
+        buildRestrictionSets(type, table, whereClause, boundNames, indexRegistry);
 
-            if (operator.requiresIndexing())
-            {
-                SimpleRestriction restriction = relation.toRestriction(table, boundNames);
-
-                if (!type.allowUseOfSecondaryIndices() || !restriction.hasSupportingIndex(indexRegistry))
-                    throw invalidRequest("%s restriction is only supported on properly " +
-                                                        "indexed columns. %s is not valid.", operator, relation);
-
-                addRestriction(restriction, indexRegistry);
-            }
-            else
-            {
-                addRestriction(relation.toRestriction(table, boundNames), indexRegistry);
-            }
-        }
+        validateClusteringColumnsRestrictions(indexRegistry, allowFiltering);
 
         // ORDER BY clause.
         // Some indexes can be used for ordering.
@@ -346,6 +316,61 @@ public final class StatementRestrictions
             validateSecondaryIndexSelections();
     }
 
+    private void buildRestrictionSets(StatementType type, TableMetadata table, WhereClause whereClause, VariableSpecifications boundNames, IndexRegistry indexRegistry)
+    {
+        PartitionKeyRestrictions.Builder partitionKeyRestrictionsBuilder = PartitionKeyRestrictions.builder(table.partitionKeyAsClusteringComparator());
+        ClusteringColumnRestrictions.Builder clusteringRestrictionsBuilder = ClusteringColumnRestrictions.builder(table.comparator);
+        RestrictionSet.Builder nonPrimaryKeyRestrictionsBuilder = RestrictionSet.builder();
+
+        for (Relation relation : whereClause.relations)
+        {
+            Operator operator = relation.operator();
+
+            if (operator.requiresFilteringOrIndexingFor(ColumnMetadata.Kind.CLUSTERING) && (type.isUpdate() || type.isDelete()))
+                throw invalidRequest("Cannot use %s with %s", type, operator);
+
+            SimpleRestriction restriction = relation.toRestriction(table, boundNames);
+
+            if (operator.requiresIndexing() && (!type.allowUseOfSecondaryIndices() || !restriction.hasSupportingIndex(indexRegistry)))
+                throw invalidRequest("%s restriction is only supported on properly " +
+                                     "indexed columns. %s is not valid.", operator, relation);
+
+            ColumnMetadata column = restriction.firstColumn();
+
+            if (column.isPartitionKey())
+                partitionKeyRestrictionsBuilder.addRestriction(restriction);
+            else if (column.isClusteringColumn())
+                clusteringRestrictionsBuilder.addRestriction(restriction);
+            else
+                nonPrimaryKeyRestrictionsBuilder.addRestriction(restriction);
+        }
+
+        partitionKeyRestrictions = partitionKeyRestrictionsBuilder.build();
+
+    }
+
+    private void validateClusteringColumnsRestrictions(IndexRegistry indexRegistry, boolean allowFiltering)
+    {
+        if (!allowFiltering)
+        {
+            SingleRestriction previous = null;
+            for (SingleRestriction current : clusteringColumnsRestrictions.restrictions)
+            {
+                if (previous != null)
+                {
+                    if (indexRegistry != null && current.hasSupportingIndex(indexRegistry))
+                        continue;
+
+                    checkFalse(previous.isSlice(),
+                               "Clustering column \"%s\" cannot be restricted (preceding column \"%s\" is restricted by a non-EQ relation)",
+                               current.firstColumn().name,
+                               previous.firstColumn().name);
+                }
+                previous = current;
+            }
+        }
+    }
+
     public boolean requiresAllowFilteringIfNotSpecified()
     {
         if (!table.isVirtual())
@@ -354,18 +379,6 @@ public final class StatementRestrictions
         VirtualTable tableNullable = VirtualKeyspaceRegistry.instance.getTableNullable(table.id);
         assert tableNullable != null;
         return !tableNullable.allowFilteringImplicitly();
-    }
-
-    private void addRestriction(SimpleRestriction restriction, IndexRegistry indexRegistry)
-    {
-        ColumnMetadata column = restriction.firstColumn();
-
-        if (column.isPartitionKey())
-            partitionKeyRestrictions = partitionKeyRestrictions.mergeWith(restriction);
-        else if (column.isClusteringColumn())
-            clusteringColumnsRestrictions = clusteringColumnsRestrictions.mergeWith(restriction, indexRegistry);
-        else
-            nonPrimaryKeyRestrictions = nonPrimaryKeyRestrictions.addRestriction(restriction);
     }
 
     public void addFunctionsTo(List<Function> functions)
